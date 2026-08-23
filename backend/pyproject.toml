@@ -1,0 +1,22 @@
+[project]
+name = "domain-launch-assistant"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "celery>=5.6.3",
+    "dj-database-url>=3.1.2",
+    "django>=6.1",
+    "django-cors-headers>=4.9.0",
+    "djangorestframework>=3.18.0",
+    "djangorestframework-simplejwt>=5.5.1",
+    "psycopg2-binary>=2.9.12",
+    "python-decouple>=3.8",
+    "redis>=8.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-django>=4.14.0",
+]
