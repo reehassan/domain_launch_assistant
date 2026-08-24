@@ -28,7 +28,12 @@ class LaunchProjectViewSet(
         # This is the ownership enforcement: a user can never see another
         # user's projects because they're never in the queryset to begin
         # with. Don't rely on serializer-level checks alone for this.
-        return LaunchProject.objects.filter(user=self.request.user)
+        #
+        # ordered explicitly (-created_at) so pagination is stable —
+        # Postgres doesn't guarantee row order without it.
+        return LaunchProject.objects.filter(
+            user=self.request.user
+        ).order_by("-created_at")
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
