@@ -73,7 +73,7 @@ The architecture deliberately avoids microservices. A modular monolith provides 
                          │      Celery Worker      │
                          │    Background Jobs      │
                          └─────────────────────────┘
-````
+```
 
 ---
 
@@ -187,7 +187,7 @@ The exact repository structure may vary depending on implementation decisions, b
 The backend is divided into focused Django apps.
 
 | Django App | Responsibility                      | Main Models                    |
-| ---------- | ------------------------------------ | ------------------------------- |
+| ---------- | ------------------------------------ | -------------------------------- |
 | `accounts` | Authentication operations only: register, login, logout, token refresh, current-user endpoint | — |
 | `users`    | User identity and profile data       | `User`                          |
 | `launches` | Core launch-project workflow        | `LaunchProject`                |
@@ -197,6 +197,8 @@ The backend is divided into focused Django apps.
 | `core`     | Shared utilities and infrastructure | Shared/base models             |
 
 The apps represent business domains rather than technical layers.
+
+> **Note on URL structure:** although `domains` and `dns` are separate Django apps, the public API groups their endpoints under a shared `/api/v1/domains/{id}/...` URL prefix (see api-contract.md sections 19–21: `configure-dns/`, `check/`, `checks/`) rather than giving `dns` its own `/api/v1/dns/...` prefix. This is a deliberate client-facing choice — from the frontend's perspective, a domain's DNS state is part of that domain resource — and does not change the app boundary: the `dns` app's views are simply registered under the shared `domains/{id}/` URL path in `config/api_router.py`.
 
 ---
 

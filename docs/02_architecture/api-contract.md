@@ -22,7 +22,7 @@ Django REST Framework
               ├── name.com
               ├── PostgreSQL
               └── Celery
-````
+```
 
 ---
 
@@ -553,7 +553,7 @@ BRANDS_READY
 
 ---
 
-# 13. Get Brand Ideas
+# 13. Get Brand Ideas 
 
 ```http
 GET /api/v1/projects/{id}/brands/
@@ -670,7 +670,7 @@ Required.
 
 ```json
 {
-  "brand_id": "uuid",
+  "brand_idea_id": "uuid",
   "extensions": [
     ".com",
     ".ai",
@@ -678,6 +678,8 @@ Required.
   ]
 }
 ```
+
+`brand_idea_id` is required — every domain search must originate from a selected brand idea (matches `DomainSearch.brand_idea_id` in data-model.md).
 
 ### Response
 
@@ -747,7 +749,7 @@ Required.
   "results": [
     {
       "id": "uuid",
-      "brand_id": "uuid",
+      "brand_idea_id": "uuid",
       "status": "COMPLETED",
       "requested_extensions": [
         ".com",
@@ -888,11 +890,103 @@ The selected domain must:
 
 ---
 
-# 19. Check Domain / DNS
+> **Note on the endpoints below:** `configure-dns/`, `check/`, and `checks/` are implemented by the `dns` Django app (see architecture.md section 4), even though they share the `/api/v1/domains/{id}/...` URL prefix used by the `domains` app's endpoints above. The shared prefix is a deliberate URL-design choice — from the client's perspective, a domain's DNS state is part of that domain resource — and does not imply the two Django apps are merged.
+
+---
+
+# 19. Configure DNS
+
+```http
+POST /api/v1/domains/{id}/configure-dns/
+```
+
+### Authentication
+
+Required.
+
+### Request
+
+```json
+{
+  "records": [
+    {
+      "record_type": "A",
+      "record_name": "@",
+      "value": "203.0.113.10"
+    },
+    {
+      "record_type": "CNAME",
+      "record_name": "www",
+      "value": "ledgerflow.ai"
+    }
+  ]
+}
+```
+
+`records` is required — at least one DNS record must be requested.
+
+### Response
+
+Because DNS configuration is asynchronous:
+
+```http
+202 Accepted
+```
+
+```json
+{
+  "domain_id": "uuid",
+  "project_id": "uuid",
+  "status": "CONFIGURING_DNS",
+  "task_id": "celery-task-id"
+}
+```
+
+The project status becomes:
+
+```text
+CONFIGURING_DNS
+```
+
+The Celery worker writes the requested records through the name.com DNS API. This corresponds to `DNSConfigurationService` in architecture.md.
+
+After successful completion:
+
+```text
+CONFIGURING_DNS
+        ↓
+VERIFYING_DNS
+```
+
+Once DNS is configured, call `POST /api/v1/domains/{id}/check/` (below) to verify it — configuration and verification are separate steps.
+
+### Errors
+
+```text
+400 VALIDATION_ERROR
+
+401 AUTHENTICATION_REQUIRED
+
+403 PERMISSION_DENIED
+
+404 NOT_FOUND
+
+409 CONFLICT
+
+502 EXTERNAL_API_TIMEOUT
+
+503 EXTERNAL_API_ERROR
+```
+
+---
+
+# 20. Verify DNS / Domain Readiness
 
 ```http
 POST /api/v1/domains/{id}/check/
 ```
+
+> Corresponds to `DNSVerificationService` in architecture.md. Run this **after** `configure-dns` above, to confirm the written records actually resolve and the domain is launch-ready.
 
 ### Authentication
 
@@ -960,7 +1054,7 @@ Calculate launch readiness
 
 ---
 
-# 20. Get Domain Checks
+# 21. Get Domain Checks
 
 ```http
 GET /api/v1/domains/{id}/checks/
@@ -1007,7 +1101,7 @@ Required.
 
 ---
 
-# 21. Get Launch Report
+# 22. Get Launch Report
 
 ```http
 GET /api/v1/projects/{id}/launch-report/
@@ -1079,7 +1173,7 @@ If the project is not ready:
 
 ---
 
-# 22. Background Task Status
+# 23. Background Task Status
 
 React needs a way to determine whether asynchronous operations have completed.
 
@@ -1127,7 +1221,7 @@ Required.
 
 ---
 
-# 23. Endpoint Summary
+# 24. Endpoint Summary
 
 | Method | Endpoint                                 | Purpose                    | Async |
 | ------ | ----------------------------------------- | --------------------------- | ----- |
@@ -1146,14 +1240,15 @@ Required.
 | `GET`  | `/api/v1/projects/{id}/domain-searches/` | Search history             | No    |
 | `GET`  | `/api/v1/projects/{id}/domains/`         | Get domain results         | No    |
 | `POST` | `/api/v1/projects/{id}/select-domain/`   | Select domain              | No    |
-| `POST` | `/api/v1/domains/{id}/check/`            | Check DNS/domain           | Yes   |
+| `POST` | `/api/v1/domains/{id}/configure-dns/`    | Configure DNS records      | Yes   |
+| `POST` | `/api/v1/domains/{id}/check/`            | Verify DNS/domain          | Yes   |
 | `GET`  | `/api/v1/domains/{id}/checks/`           | Get domain checks          | No    |
 | `GET`  | `/api/v1/projects/{id}/launch-report/`   | Get launch report          | No    |
 | `GET`  | `/api/v1/tasks/{task_id}/`               | Get background task status | No    |
 
 ---
 
-# 24. Authentication and Ownership Rules
+# 25. Authentication and Ownership Rules
 
 Every protected endpoint must verify:
 
@@ -1187,7 +1282,7 @@ Authorization is always enforced by Django.
 
 ---
 
-# 25. External API Failure Contract
+# 26. External API Failure Contract
 
 External provider failures must be normalized into application-level errors.
 
@@ -1225,7 +1320,7 @@ The API must **not** expose raw provider responses or credentials.
 
 ---
 
-# 26. AI Failure Contract
+# 27. AI Failure Contract
 
 If Gemini returns invalid structured data:
 
@@ -1258,7 +1353,7 @@ Invalid AI output must never be stored as a valid `BrandIdea`.
 
 ---
 
-# 27. Important API Rules
+# 28. Important API Rules
 
 The API must enforce the following rules:
 
@@ -1280,7 +1375,7 @@ The API must enforce the following rules:
 
 ---
 
-# 28. Complete Application Flow
+# 29. Complete Application Flow
 
 ```text
 React
@@ -1316,6 +1411,16 @@ DomainResult[]
   ↓
 LaunchProject.selected_domain
   │
+  │ POST /api/v1/domains/{id}/configure-dns/
+  ↓
+Celery
+  │
+  ↓
+name.com DNS API
+  │
+  ↓
+DNS records written
+  │
   │ POST /api/v1/domains/{id}/check/
   ↓
 Celery
@@ -1342,7 +1447,7 @@ LaunchReadinessService
 
 ---
 
-# 29. React Integration
+# 30. React Integration
 
 The React frontend is an API consumer.
 
