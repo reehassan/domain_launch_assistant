@@ -45,7 +45,8 @@ class TestRegistration:
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "username" in response.data
+        assert response.data["error"]["code"] == "VALIDATION_ERROR"
+        assert "username" in response.data["error"]["details"]
 
     def test_register_missing_password_fails(self, api_client):
         response = api_client.post(
