@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "domain_launch_assistant.launches.apps.LaunchesConfig",
     "domain_launch_assistant.brands.apps.BrandsConfig",
     "domain_launch_assistant.domains.apps.DomainsConfig",
+    "domain_launch_assistant.dns.apps.DnsConfig",
 
 ]
 
