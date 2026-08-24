@@ -52,6 +52,9 @@ INSTALLED_APPS = [
     "domain_launch_assistant.users.apps.UsersConfig",
     "domain_launch_assistant.accounts.apps.AccountsConfig",
     "domain_launch_assistant.launches.apps.LaunchesConfig",
+    "domain_launch_assistant.brands.apps.BrandsConfig",
+    "domain_launch_assistant.domains.apps.DomainsConfig",
+
 ]
 
 # NOTE: CorsMiddleware must sit as high as possible, definitely before
@@ -123,9 +126,7 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
-# Django REST Framework
-
+# Django REST Framework Settings
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -133,8 +134,12 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    "EXCEPTION_HANDLER": "domain_launch_assistant.utils.exceptions.custom_exception_handler",
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
 }
 
+# Simple JWT Settings
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
@@ -182,3 +187,16 @@ MAILERS = {
 # Redis (used for caching / Celery broker in later steps)
 
 REDIS_URL = config("REDIS_URL")
+
+GEMINI_API_KEY = config("GEMINI_API_KEY")
+GEMINI_MODEL = config("GEMINI_MODEL")
+
+BRAND_GENERATION_DEFAULT_COUNT = config("BRAND_GENERATION_DEFAULT_COUNT", default=5, cast=int)
+
+
+NAMECOM_USERNAME = config("NAMECOM_USERNAME")
+NAMECOM_API_TOKEN = config("NAMECOM_API_TOKEN")
+NAMECOM_BASE_URL = config("NAMECOM_BASE_URL", default="https://api.name.com/core/v1")
+DOMAIN_FRESHNESS_THRESHOLD_SECONDS = config(
+    "DOMAIN_FRESHNESS_THRESHOLD_SECONDS", default=300, cast=int
+)
