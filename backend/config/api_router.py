@@ -20,4 +20,8 @@ urlpatterns = [
         "",
         include("domain_launch_assistant.domains.urls"),
     ),
+    path(
+        "",
+        include("domain_launch_assistant.dns.urls"),
+    ),
 ]
