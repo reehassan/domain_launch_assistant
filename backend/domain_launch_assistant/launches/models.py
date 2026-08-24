@@ -11,14 +11,14 @@ class LaunchProject(models.Model):
     """
 
     class Status(models.TextChoices):
-        DRAFT = "draft", "Draft"
-        GENERATING_BRANDS = "generating_brands", "Generating Brands"
-        BRANDS_READY = "brands_ready", "Brands Ready"
-        CHECKING_DOMAINS = "checking_domains", "Checking Domains"
-        DOMAIN_SELECTED = "domain_selected", "Domain Selected"
-        CONFIGURING_DNS = "configuring_dns", "Configuring DNS"
-        VERIFYING_DNS = "verifying_dns", "Verifying DNS"
-        READY = "ready", "Ready"
+        DRAFT = "DRAFT", "Draft"
+        GENERATING_BRANDS = "GENERATING_BRANDS", "Generating Brands"
+        BRANDS_READY = "BRANDS_READY", "Brands Ready"
+        CHECKING_DOMAINS = "CHECKING_DOMAINS", "Checking Domains"
+        DOMAIN_SELECTED = "DOMAIN_SELECTED", "Domain Selected"
+        CONFIGURING_DNS = "CONFIGURING_DNS", "Configuring DNS"
+        VERIFYING_DNS = "VERIFYING_DNS", "Verifying DNS"
+        READY = "READY", "Ready"
         FAILED = "failed", "Failed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -46,28 +46,24 @@ class LaunchProject(models.Model):
         help_text="Current workflow status.",
     )
 
-    # NOTE: selected_brand and selected_domain point to models that don't
-    # exist yet (the `brands` and `domains` apps come later in the roadmap).
-    # Leave these two fields commented out until those apps are built, then
-    # uncomment, makemigrations, and migrate again.
-    #
-    # selected_brand = models.ForeignKey(
-    #     "brands.BrandIdea",
-    #     on_delete=models.SET_NULL,
-    #     null=True,
-    #     blank=True,
-    #     related_name="selected_for_projects",
-    #     help_text="Selected brand idea, if any.",
-    # )
-    #
-    # selected_domain = models.ForeignKey(
-    #     "domains.DomainResult",
-    #     on_delete=models.SET_NULL,
-    #     null=True,
-    #     blank=True,
-    #     related_name="selected_for_projects",
-    #     help_text="Selected domain, if any.",
-    # )
+    # `brands` app now exists, so this FK is live. Run makemigrations/migrate
+    # on the `launches` app after adding this field.
+    selected_brand = models.ForeignKey(
+        "brands.BrandIdea",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="selected_for_projects",
+        help_text="Selected brand idea, if any.",
+    )
+    selected_domain = models.ForeignKey(
+        "domains.DomainResult",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="selected_for_projects",
+        help_text="Selected domain, if any.",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -98,8 +94,8 @@ class LaunchProject(models.Model):
         Extra validation beyond what DB constraints can express:
         - selected_brand, when present, must belong to this same project.
         - selected_domain, when present, must belong to this same project.
-        These checks activate once the commented-out FK fields above are
-        enabled (i.e. once the brands/domains apps exist).
+        The selected_domain check activates once the `domains` app exists
+        and that FK is uncommented above.
         """
         from django.core.exceptions import ValidationError
 
