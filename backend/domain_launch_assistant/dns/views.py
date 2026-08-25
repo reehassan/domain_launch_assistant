@@ -18,20 +18,16 @@ from domain_launch_assistant.dns.services.check_domain import (
     CheckDomainService,
     CheckDomainUnsupportedTypeError,
 )
+from domain_launch_assistant.dns.tasks import run_domain_checks_task
 from domain_launch_assistant.domains.models import DomainResult
-from domain_launch_assistant.launches.models import LaunchProject
+from domain_launch_assistant.tasks.models import TaskRecord
 from domain_launch_assistant.utils.exceptions import api_error
 
 
 class CheckDomainView(APIView):
     """
-    Run DNS/domain readiness checks against a project's selected
-    domain result.
-
-    Corresponds to api-contract.md section 20. Note the URL lives
-    under /domains/{id}/... per the contract's explicit call-out —
-    {id} here is a DomainResult.id, not scoped through a project_id
-    in the URL, so ownership is enforced via domain_result.project.user.
+    Kicks off DNS/domain readiness checks as a background task.
+    Corresponds to api-contract.md section 20.
     """
 
     permission_classes = [IsAuthenticated]
@@ -53,12 +49,10 @@ class CheckDomainView(APIView):
                 details=serializer.errors,
             )
 
+        check_types = serializer.validated_data["check_types"]
+
         try:
-            CheckDomainService().run_checks(
-                project=project,
-                domain_result=domain_result,
-                check_types=serializer.validated_data["check_types"],
-            )
+            CheckDomainService.validate_check_types(check_types)
         except CheckDomainUnsupportedTypeError as exc:
             return api_error(
                 code="VALIDATION_ERROR",
@@ -66,21 +60,26 @@ class CheckDomainView(APIView):
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
-        project.status = LaunchProject.Status.VERIFYING_DNS
-        project.save(update_fields=["status"])
+        checks = CheckDomainService().create_pending_checks(
+            project=project,
+            domain_result=domain_result,
+            check_types=check_types,
+        )
+
+        task_id = uuid.uuid4()
+        TaskRecord.objects.create(
+            task_id=task_id,
+            project=project,
+            status=TaskRecord.Status.PENDING,
+        )
+
+        run_domain_checks_task.delay(str(task_id), [str(c.id) for c in checks])
 
         return Response(
             {
                 "domain_id": str(domain_result.id),
-                # Synchronous today, same placeholder pattern as
-                # DomainSearchStartView — checks have actually already
-                # run and been persisted by the time this responds, so
-                # "COMPLETED" reflects real state rather than the
-                # "PENDING" shown in api-contract.md's async example.
-                # Revisit alongside domain_search.py once Celery is
-                # wired into both.
-                "status": "COMPLETED",
-                "task_id": str(uuid.uuid4()),
+                "status": "PROCESSING",
+                "task_id": str(task_id),
             },
             status=status.HTTP_202_ACCEPTED,
         )

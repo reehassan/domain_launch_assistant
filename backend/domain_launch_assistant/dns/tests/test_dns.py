@@ -10,6 +10,7 @@ from rest_framework.test import APIClient
 from domain_launch_assistant.dns.models import DomainCheck
 from domain_launch_assistant.domains.models import DomainResult
 from domain_launch_assistant.launches.models import LaunchProject
+from domain_launch_assistant.tasks.models import TaskRecord
 
 pytestmark = pytest.mark.django_db
 
@@ -44,6 +45,8 @@ class TestCheckDomain:
         assert response.status_code == status.HTTP_202_ACCEPTED
         assert response.data["domain_id"] == str(domain_result_a.id)
         assert "task_id" in response.data
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.SUCCESS
 
         checks = DomainCheck.objects.filter(domain_result=domain_result_a)
         assert checks.count() == 2
@@ -99,6 +102,10 @@ class TestCheckDomain:
         assert response.status_code == status.HTTP_202_ACCEPTED
         check = DomainCheck.objects.get(domain_result=domain_result_a)
         assert check.status == DomainCheck.Status.ERROR
+        # Regression: an ERROR-status check is a captured outcome, not
+        # a task crash — the task itself must still report SUCCESS.
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.SUCCESS
 
     def test_domain_readiness_fail_when_not_selected(
         self, auth_client_a, project_a, domain_result_a
