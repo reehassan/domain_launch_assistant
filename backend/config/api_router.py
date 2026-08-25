@@ -24,4 +24,8 @@ urlpatterns = [
         "",
         include("domain_launch_assistant.dns.urls"),
     ),
+    path(
+        "",
+        include("domain_launch_assistant.tasks.urls"),
+    ),
 ]
