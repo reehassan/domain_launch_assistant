@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     "domain_launch_assistant.brands.apps.BrandsConfig",
     "domain_launch_assistant.domains.apps.DomainsConfig",
     "domain_launch_assistant.dns.apps.DnsConfig",
+    "domain_launch_assistant.tasks.apps.TasksConfig",
 
 ]
 
@@ -201,3 +202,11 @@ NAMECOM_BASE_URL = config("NAMECOM_BASE_URL", default="https://api.name.com/core
 DOMAIN_FRESHNESS_THRESHOLD_SECONDS = config(
     "DOMAIN_FRESHNESS_THRESHOLD_SECONDS", default=300, cast=int
 )
+
+# Celery
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
