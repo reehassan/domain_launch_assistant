@@ -7,19 +7,15 @@ from rest_framework.test import APIClient
 from domain_launch_assistant.brands.clients.gemini import GeminiClientError
 from domain_launch_assistant.brands.models import BrandIdea
 from domain_launch_assistant.launches.models import LaunchProject
+from domain_launch_assistant.tasks.models import TaskRecord
 
 pytestmark = pytest.mark.django_db
 
 
 def _mock_gemini():
-    """
-    Patches GeminiClient at the point brand_generation.py imports it, so
-    BrandGenerationService() picks up the mock without any code changes.
-    """
     return patch(
         "domain_launch_assistant.brands.services.brand_generation.GeminiClient"
     )
-
 
 class TestGenerateBrands:
     def test_generate_brands_success(self, auth_client_a, project_a):
@@ -37,9 +33,12 @@ class TestGenerateBrands:
                 format="json",
             )
 
-        assert response.status_code == status.HTTP_201_CREATED
-        assert len(response.data) == 2
-        names = {b["name"] for b in response.data}
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        assert response.data["status"] == "PROCESSING"
+
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.SUCCESS
+        names = {b["name"] for b in task.result}
         assert names == {"LedgerMind", "Balancely"}
         assert BrandIdea.objects.filter(project=project_a).count() == 2
 
@@ -57,10 +56,13 @@ class TestGenerateBrands:
                 format="json",
             )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert response.status_code == status.HTTP_202_ACCEPTED
         instance.generate_brand_ideas.assert_called_once()
         _, kwargs = instance.generate_brand_ideas.call_args
         assert kwargs["count"] == 5
+
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.SUCCESS
 
     def test_generate_brands_invalid_count_type(self, auth_client_a, project_a):
         response = auth_client_a.post(
@@ -98,7 +100,9 @@ class TestGenerateBrands:
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert response.data["error"]["code"] == "NOT_FOUND"
 
-    def test_generate_brands_gemini_failure_returns_502(self, auth_client_a, project_a):
+    def test_generate_brands_gemini_failure_marks_task_failed(
+        self, auth_client_a, project_a
+    ):
         with _mock_gemini() as MockClient:
             instance = MockClient.return_value
             instance.generate_brand_ideas.side_effect = GeminiClientError("boom")
@@ -108,10 +112,12 @@ class TestGenerateBrands:
                 format="json",
             )
 
-        assert response.status_code == status.HTTP_502_BAD_GATEWAY
-        assert response.data["error"]["code"] == "AI_GENERATION_FAILED"
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.FAILURE
+        assert task.error_code == "AI_GENERATION_FAILED"
 
-    def test_generate_brands_wrong_count_returned_by_gemini_fails(
+    def test_generate_brands_wrong_count_returned_by_gemini_marks_task_failed(
         self, auth_client_a, project_a
     ):
         with _mock_gemini() as MockClient:
@@ -125,16 +131,20 @@ class TestGenerateBrands:
                 format="json",
             )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.FAILURE
+        assert task.error_code == "BRAND_GENERATION_INVALID"
         assert BrandIdea.objects.filter(project=project_a).count() == 0
 
-    def test_generate_brands_duplicate_name_in_existing_project_returns_502(
+    def test_generate_brands_duplicate_name_in_existing_project_marks_task_failed(
         self, auth_client_a, project_a
     ):
         """
-        Regression test: a name collision with a brand already persisted
-        for this project (case-insensitive) must surface as a clean
-        AI_GENERATION_FAILED response, not a raw IntegrityError 500.
+        Regression test for the original bug #11: a name collision with a
+        brand already persisted for this project (case-insensitive) must
+        surface as a clean AI_GENERATION_FAILED task failure, not an
+        uncaught IntegrityError inside the worker.
         """
         BrandIdea.objects.create(
             project=project_a,
@@ -152,11 +162,11 @@ class TestGenerateBrands:
                 format="json",
             )
 
-        assert response.status_code == status.HTTP_502_BAD_GATEWAY
-        assert response.data["error"]["code"] == "AI_GENERATION_FAILED"
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.FAILURE
+        assert task.error_code == "AI_GENERATION_FAILED"
         assert BrandIdea.objects.filter(project=project_a).count() == 1
-
-
 class TestListBrands:
     def test_list_brands_returns_only_this_projects_brands(self, auth_client_a, project_a, project_b):
         BrandIdea.objects.create(project=project_a, name="Mine", description="d")

@@ -1,25 +1,37 @@
+# Standard Library
+import uuid
+
+# Django
 from django.db import IntegrityError
 from django.shortcuts import get_object_or_404
 
+# Django REST Framework
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from domain_launch_assistant.brands.models import BrandIdea
-from domain_launch_assistant.launches.models import LaunchProject
-from domain_launch_assistant.brands.serializers import BrandIdeaSerializer
+# Local Project App Imports
 from domain_launch_assistant.brands.clients.gemini import GeminiClientError
-from domain_launch_assistant.utils.exceptions import api_error
+from domain_launch_assistant.brands.models import BrandIdea
+from domain_launch_assistant.brands.serializers import BrandIdeaSerializer
 from domain_launch_assistant.brands.services.brand_generation import (
     BrandGenerationError,
     BrandGenerationService,
 )
+from domain_launch_assistant.brands.tasks import generate_brand_ideas_task
+from domain_launch_assistant.launches.models import LaunchProject
+from domain_launch_assistant.tasks.models import TaskRecord
+from domain_launch_assistant.utils.exceptions import api_error
+
 
 
 class BrandGenerateView(APIView):
     """
-    Generate brand ideas for a launch project.
+    Kicks off brand-idea generation as a background task. Validation
+    that doesn't need Gemini (count type/range, project ownership)
+    still happens synchronously here — only the Gemini call and the
+    persistence step move into generate_brand_ideas_task.
     """
 
     permission_classes = [IsAuthenticated]
@@ -49,48 +61,19 @@ class BrandGenerateView(APIView):
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            brand_ideas = BrandGenerationService().generate_brand_ideas(
-                project=project,
-                count=count,
-            )
-        except BrandGenerationError as exc:
-            return Response(
-                {"detail": str(exc)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        except GeminiClientError:
-            return Response(
-                {
-                    "error": {
-                        "code": "AI_GENERATION_FAILED",
-                        "message": "Brand generation could not be completed. Please try again.",
-                    }
-                },
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-        except IntegrityError:
-            return Response(
-                {
-                    "error": {
-                        "code": "AI_GENERATION_FAILED",
-                        "message": "Brand generation produced conflicting results. Please try again.",
-                    }
-                },
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        serializer = BrandIdeaSerializer(
-            brand_ideas,
-            many=True,
+        task_id = uuid.uuid4()
+        TaskRecord.objects.create(
+            task_id=task_id,
+            project=project,
+            status=TaskRecord.Status.PENDING,
         )
+
+        generate_brand_ideas_task.delay(str(task_id), str(project.id), count)
 
         return Response(
-            serializer.data,
-            status=status.HTTP_201_CREATED,
+            {"task_id": str(task_id), "status": "PROCESSING"},
+            status=status.HTTP_202_ACCEPTED,
         )
-
-
 class BrandIdeaListView(APIView):
     """
     List all brand ideas belonging to a launch project.
