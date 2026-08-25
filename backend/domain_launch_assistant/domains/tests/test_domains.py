@@ -14,6 +14,7 @@ from domain_launch_assistant.domains.clients.exceptions import (
 )
 from domain_launch_assistant.domains.models import DomainResult, DomainSearch
 from domain_launch_assistant.launches.models import LaunchProject
+from domain_launch_assistant.tasks.models import TaskRecord
 
 pytestmark = pytest.mark.django_db
 
@@ -54,7 +55,6 @@ def _create_search(project, brand_idea, status_=DomainSearch.Status.COMPLETED):
         requested_extensions=[".com", ".ai"],
     )
 
-
 class TestStartDomainSearch:
     def test_start_search_success(self, auth_client_a, project_a, brand_idea_a):
         with _mock_namecom() as MockClient:
@@ -71,11 +71,15 @@ class TestStartDomainSearch:
 
         assert response.status_code == status.HTTP_202_ACCEPTED
         assert response.data["project_id"] == str(project_a.id)
-        assert response.data["status"] == DomainSearch.Status.COMPLETED
+        assert response.data["status"] == "PROCESSING"
         assert "search_id" in response.data
         assert "task_id" in response.data
 
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.SUCCESS
+
         search = DomainSearch.objects.get(id=response.data["search_id"])
+        assert search.status == DomainSearch.Status.COMPLETED
         results = DomainResult.objects.filter(search=search)
         assert results.count() == 2
         taken = results.get(domain="ledgerflow.com")
@@ -130,7 +134,7 @@ class TestStartDomainSearch:
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
-    def test_start_search_provider_timeout_returns_502(
+    def test_start_search_provider_timeout_marks_task_failed(
         self, auth_client_a, project_a, brand_idea_a
     ):
         with _mock_namecom() as MockClient:
@@ -142,15 +146,17 @@ class TestStartDomainSearch:
                 format="json",
             )
 
-        assert response.status_code == status.HTTP_502_BAD_GATEWAY
-        assert response.data["error"]["code"] == "EXTERNAL_API_TIMEOUT"
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.FAILURE
+        assert task.error_code == "EXTERNAL_API_TIMEOUT"
 
         search = DomainSearch.objects.get(project=project_a)
         assert search.status == DomainSearch.Status.FAILED
         assert search.error_message == "timed out"
         assert DomainResult.objects.filter(search=search).count() == 0
 
-    def test_start_search_provider_error_returns_503(
+    def test_start_search_provider_error_marks_task_failed(
         self, auth_client_a, project_a, brand_idea_a
     ):
         with _mock_namecom() as MockClient:
@@ -162,20 +168,17 @@ class TestStartDomainSearch:
                 format="json",
             )
 
-        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-        assert response.data["error"]["code"] == "EXTERNAL_API_ERROR"
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.FAILURE
+        assert task.error_code == "EXTERNAL_API_ERROR"
 
         search = DomainSearch.objects.get(project=project_a)
         assert search.status == DomainSearch.Status.FAILED
 
-    def test_start_search_unslugifiable_brand_name_returns_400(
+    def test_start_search_unslugifiable_brand_name_marks_task_failed(
         self, auth_client_a, project_a
     ):
-        """
-        Regression test: a brand name with no valid domain-label
-        characters (all punctuation) must fail cleanly as
-        VALIDATION_ERROR, not crash or silently produce an empty domain.
-        """
         from domain_launch_assistant.brands.models import BrandIdea
 
         odd_brand = BrandIdea.objects.create(
@@ -186,18 +189,14 @@ class TestStartDomainSearch:
             {"brand_idea_id": str(odd_brand.id), "extensions": [".com"]},
             format="json",
         )
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert response.data["error"]["code"] == "VALIDATION_ERROR"
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.FAILURE
+        assert task.error_code == "VALIDATION_ERROR"
 
     def test_start_search_provider_omits_a_domain_marks_check_failed(
         self, auth_client_a, project_a, brand_idea_a
     ):
-        """
-        Regression test: if name.com's response is missing one of the
-        requested domains (the overall call succeeded), that domain
-        must be recorded as CHECK_FAILED, not silently dropped or
-        interpreted as TAKEN.
-        """
         with _mock_namecom() as MockClient:
             instance = MockClient.return_value
             instance.check_availability.return_value = [
@@ -215,7 +214,6 @@ class TestStartDomainSearch:
         missing = DomainResult.objects.get(search=search, domain="ledgerflow.ai")
         assert missing.status == DomainResult.Status.CHECK_FAILED
         assert missing.available is False
-
 
 class TestListDomainSearches:
     def test_list_returns_only_this_projects_searches(

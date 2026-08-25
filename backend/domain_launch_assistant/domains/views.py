@@ -1,14 +1,21 @@
 # domain_launch_assistant/domains/views.py
 
+# Standard Library
+import uuid
+
+# Django
+from django.conf import settings
 from django.db import IntegrityError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
+# Django REST Framework
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+# Local Project App Imports
 from domain_launch_assistant.brands.models import BrandIdea
 from domain_launch_assistant.domains.clients.exceptions import (
     NameComAPIError,
@@ -21,7 +28,6 @@ from domain_launch_assistant.domains.serializers import (
     DomainSearchSerializer,
     SelectDomainSerializer,
 )
-
 from domain_launch_assistant.domains.services.domain_search import (
     DomainSearchError,
     DomainSearchInputError,
@@ -29,21 +35,19 @@ from domain_launch_assistant.domains.services.domain_search import (
     DomainSearchService,
     DomainSearchTimeoutError,
 )
-
+from domain_launch_assistant.domains.tasks import check_domains_task
 from domain_launch_assistant.launches.models import LaunchProject
+from domain_launch_assistant.tasks.models import TaskRecord
 from domain_launch_assistant.utils.exceptions import api_error
 
-import uuid
-
-from django.conf import settings
 
 
 class DomainSearchStartView(APIView):
     """
     Start a domain availability search for a launch project, scoped to
-    one of its brand ideas.
-
-    Corresponds to api-contract.md section 15.
+    one of its brand ideas. Creates a PENDING DomainSearch row
+    synchronously, then dispatches the actual provider check to a
+    background task.
     """
 
     permission_classes = [IsAuthenticated]
@@ -56,7 +60,6 @@ class DomainSearchStartView(APIView):
         )
 
         serializer = DomainSearchRequestSerializer(data=request.data)
-
         if not serializer.is_valid():
             return api_error(
                 code="VALIDATION_ERROR",
@@ -71,55 +74,32 @@ class DomainSearchStartView(APIView):
             project=project,
         )
 
-        try:
-            search = DomainSearchService().start_search(
-                project=project,
-                brand_idea=brand_idea,
-                extensions=serializer.validated_data["extensions"],
-            )
+        search = DomainSearchService().create_pending_search(
+            project=project,
+            brand_idea=brand_idea,
+            extensions=serializer.validated_data["extensions"],
+        )
 
-        except DomainSearchInputError as exc:
-            return api_error(
-                code="VALIDATION_ERROR",
-                message=str(exc),
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
+        task_id = uuid.uuid4()
+        TaskRecord.objects.create(
+            task_id=task_id,
+            project=project,
+            status=TaskRecord.Status.PENDING,
+        )
 
-        except DomainSearchTimeoutError:
-            return api_error(
-                code="EXTERNAL_API_TIMEOUT",
-                message="The domain provider did not respond. Please try again.",
-                status_code=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        except DomainSearchProviderError:
-            return api_error(
-                code="EXTERNAL_API_ERROR",
-                message="Domain availability is temporarily unavailable.",
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
-        except DomainSearchError as exc:
-            return api_error(
-                code="DOMAIN_CHECK_FAILED",
-                message=str(exc),
-                status_code=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        except IntegrityError:
-            return api_error(
-                code="DOMAIN_CHECK_FAILED",
-                message="Domain search produced conflicting results. Please try again.",
-                status_code=status.HTTP_502_BAD_GATEWAY,
-            )
+        check_domains_task.delay(str(task_id), str(search.id))
 
         return Response(
             {
                 "search_id": str(search.id),
                 "project_id": str(project.id),
-                "status": search.status,
-                # Placeholder until Celery is introduced.
-                "task_id": str(uuid.uuid4()),
+                # Hardcoded, not read from `search.status` — with
+                # CELERY_TASK_ALWAYS_EAGER=True the task has already run
+                # against a separate DB-fetched copy of this row by the
+                # time we get here, so the local `search` object is
+                # stale in tests even though it's accurate in production.
+                "status": "PROCESSING",
+                "task_id": str(task_id),
             },
             status=status.HTTP_202_ACCEPTED,
         )

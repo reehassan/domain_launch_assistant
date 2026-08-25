@@ -14,13 +14,6 @@ from domain_launch_assistant.launches.models import LaunchProject
 
 
 class DomainSearchError(Exception):
-    """
-    Base exception for a domain search that could not be completed as a
-    whole. Subclassed so views can distinguish provider timeouts from
-    provider errors from invalid brand names, per api-contract.md
-    section 26 (External API Failure Contract) and section 27-style
-    AI failure handling.
-    """
     pass
 
 
@@ -35,54 +28,49 @@ class DomainSearchProviderError(DomainSearchError):
 
 
 class DomainSearchInputError(DomainSearchError):
-    """The search could not proceed due to invalid input (e.g. brand name
-    with no valid domain-label characters). Maps to VALIDATION_ERROR."""
+    """Invalid input (e.g. unslugifiable brand name). Maps to VALIDATION_ERROR."""
     pass
 
 
 class DomainSearchService:
     """
-    Handles the complete domain-search workflow.
-
-    Responsibilities:
-    - Create the DomainSearch record.
-    - Call AvailabilityService (which calls NameComClient).
-    - Validate and bulk-create DomainResult records from normalized results.
-    - Mark the search COMPLETED or FAILED.
-    - Ensure DomainResult writes are atomic.
-
-    This service knows about Django models.
-    AvailabilityService/NameComClient do not.
+    Split into two steps so the DomainSearch row can exist (as PENDING)
+    before a Celery task ever runs — create_pending_search() is called
+    synchronously from the view, run_search() is called from the task
+    body against that already-persisted row.
     """
 
     def __init__(self, availability_service: AvailabilityService | None = None):
         self.availability_service = availability_service or AvailabilityService()
 
-    def start_search(
+    def create_pending_search(
         self,
         project: LaunchProject,
         brand_idea: BrandIdea,
         extensions: list[str],
     ) -> DomainSearch:
-        """
-        Raises DomainSearchTimeoutError, DomainSearchProviderError, or
-        DomainSearchInputError if the search as a whole failed. The
-        DomainSearch row is still persisted as FAILED with an
-        error_message in every case, so callers/tests can inspect it —
-        but no DomainResult rows are created for a failed search.
-        """
-        search = DomainSearch.objects.create(
+        return DomainSearch.objects.create(
             project=project,
             brand_idea=brand_idea,
-            status=DomainSearch.Status.PROCESSING,
+            status=DomainSearch.Status.PENDING,
             requested_extensions=extensions,
-            started_at=timezone.now(),
         )
+
+    def run_search(self, search: DomainSearch) -> DomainSearch:
+        """
+        Runs the actual provider check for an already-created search row.
+        Raises DomainSearchTimeoutError, DomainSearchProviderError, or
+        DomainSearchInputError on failure — the search row is marked
+        FAILED with an error_message in every case, same as before.
+        """
+        search.status = DomainSearch.Status.PROCESSING
+        search.started_at = timezone.now()
+        search.save(update_fields=["status", "started_at"])
 
         try:
             normalized_results = self.availability_service.check_domains(
-                brand_name=brand_idea.name,
-                extensions=extensions,
+                brand_name=search.brand_idea.name,
+                extensions=search.requested_extensions,
             )
         except NameComTimeoutError as exc:
             self._mark_failed(search, exc)
@@ -98,7 +86,7 @@ class DomainSearchService:
             results_to_create = [
                 DomainResult(
                     search=search,
-                    project=project,
+                    project=search.project,
                     domain=result["domain"],
                     extension=result["extension"],
                     available=result["available"],
