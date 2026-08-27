@@ -24,7 +24,6 @@ def run_domain_checks_task(task_id: str, check_ids: list[str]) -> None:
     task.save(update_fields=["status"])
 
     checks = list(DomainCheck.objects.filter(id__in=check_ids))
-
     project = checks[0].project
     project.status = LaunchProject.Status.VERIFYING_DNS
     project.save(update_fields=["status"])
@@ -34,7 +33,16 @@ def run_domain_checks_task(task_id: str, check_ids: list[str]) -> None:
     # is validated synchronously in the view before this task is ever
     # dispatched, and DNS lookup failures are already caught inside the
     # handlers themselves as FAIL/ERROR check rows, not exceptions.
-    CheckDomainService().run_checks(checks)
+    ran_checks = CheckDomainService().run_checks(checks)
+
+    # Project only reaches READY once every requested check type has
+    # actually PASSed — a single FAIL or ERROR must not silently let
+    # the founder past DNS verification into Feature 5/6. On anything
+    # less than all-PASS, project.status stays VERIFYING_DNS (already
+    # set above) so the founder can re-run check/ after fixing DNS.
+    if all(c.status == DomainCheck.Status.PASS for c in ran_checks):
+        project.status = LaunchProject.Status.READY
+        project.save(update_fields=["status"])
 
     rendered = JSONRenderer().render(DomainCheckSerializer(checks, many=True).data)
     task.status = TaskRecord.Status.SUCCESS
