@@ -3,6 +3,10 @@
 from django.urls import path
 
 from domain_launch_assistant.domains.views import (
+    DomainClaimListView,
+    DomainClaimsCheckView,
+    DomainRecommendGenerateView,
+    DomainRecommendationListView,
     DomainResultListView,
     DomainSearchListView,
     DomainSearchStartView,
@@ -30,5 +34,25 @@ urlpatterns = [
         "projects/<uuid:project_id>/select-domain/",
         DomainSelectView.as_view(),
         name="domain-select",
+    ),
+    path(
+        "projects/<uuid:project_id>/recommend-domain/",
+        DomainRecommendGenerateView.as_view(),
+        name="domain-recommend-generate",
+    ),
+    path(
+        "projects/<uuid:project_id>/domain-recommendations/",
+        DomainRecommendationListView.as_view(),
+        name="domain-recommendation-list",
+    ),
+    path(
+        "domains/<uuid:domain_id>/check-claims/",
+        DomainClaimsCheckView.as_view(),
+        name="domain-claims-check",
+    ),
+    path(
+        "domains/<uuid:domain_id>/claims/",
+        DomainClaimListView.as_view(),
+        name="domain-claims-list",
     ),
 ]

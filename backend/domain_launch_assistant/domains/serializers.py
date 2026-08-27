@@ -2,7 +2,12 @@
 
 from rest_framework import serializers
 
-from domain_launch_assistant.domains.models import DomainResult, DomainSearch
+from domain_launch_assistant.domains.models import (
+    DomainClaim,
+    DomainRecommendation,
+    DomainResult,
+    DomainSearch,
+)
 
 VALID_EXTENSIONS = {".com", ".ai", ".io", ".net", ".org", ".co", ".dev", ".app"}
 
@@ -42,6 +47,10 @@ class DomainResultSerializer(serializers.ModelSerializer):
             "status",
             "provider",
             "checked_at",
+            "purchase_price",
+            "renewal_price",
+            "premium",
+            "purchase_type",
         ]
         read_only_fields = fields
 
@@ -73,3 +82,44 @@ class SelectDomainSerializer(serializers.Serializer):
     """
 
     domain_id = serializers.UUIDField(required=True)
+
+
+class DomainRecommendationSerializer(serializers.ModelSerializer):
+    """
+    Read shape for GET /projects/{id}/domain-recommendations/
+    """
+
+    project_id = serializers.UUIDField(source="project.id", read_only=True)
+    recommended_domain = DomainResultSerializer(read_only=True)
+
+    class Meta:
+        model = DomainRecommendation
+        fields = [
+            "id",
+            "project_id",
+            "recommended_domain",
+            "reasoning",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class DomainClaimSerializer(serializers.ModelSerializer):
+    """
+    Read shape for GET /domains/{id}/claims/ — same shape convention as
+    DomainCheckSerializer in the dns app.
+    """
+
+    domain_result_id = serializers.UUIDField(source="domain_result.id", read_only=True)
+
+    class Meta:
+        model = DomainClaim
+        fields = [
+            "id",
+            "domain_result_id",
+            "has_claims",
+            "claims_data",
+            "checked_at",
+            "created_at",
+        ]
+        read_only_fields = fields

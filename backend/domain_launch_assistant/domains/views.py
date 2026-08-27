@@ -21,8 +21,15 @@ from domain_launch_assistant.domains.clients.exceptions import (
     NameComAPIError,
     NameComTimeoutError,
 )
-from domain_launch_assistant.domains.models import DomainResult, DomainSearch
+from domain_launch_assistant.domains.models import (
+    DomainClaim,
+    DomainRecommendation,
+    DomainResult,
+    DomainSearch,
+)
 from domain_launch_assistant.domains.serializers import (
+    DomainClaimSerializer,
+    DomainRecommendationSerializer,
     DomainResultSerializer,
     DomainSearchRequestSerializer,
     DomainSearchSerializer,
@@ -35,7 +42,11 @@ from domain_launch_assistant.domains.services.domain_search import (
     DomainSearchService,
     DomainSearchTimeoutError,
 )
-from domain_launch_assistant.domains.tasks import check_domains_task
+from domain_launch_assistant.domains.tasks import (
+    check_domain_claims_task,
+    check_domains_task,
+    recommend_domain_task,
+)
 from domain_launch_assistant.launches.models import LaunchProject
 from domain_launch_assistant.tasks.models import TaskRecord
 from domain_launch_assistant.utils.exceptions import api_error
@@ -228,3 +239,143 @@ class DomainSelectView(APIView):
                 "status": project.status,
             }
         )
+
+
+class DomainRecommendGenerateView(APIView):
+    """
+    Kicks off AI domain recommendation as a background task.
+    Validation that doesn't need Gemini (a search has run, at least one
+    AVAILABLE domain exists) happens synchronously here — only the
+    Gemini call and persistence step move into recommend_domain_task.
+
+    Errors:
+      409 — no domain search has been completed for this project yet.
+      400 — a search exists but no AVAILABLE domains to recommend from.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, project_id):
+        project = get_object_or_404(
+            LaunchProject,
+            id=project_id,
+            user=request.user,
+        )
+
+        if not DomainSearch.objects.filter(project=project).exists():
+            return api_error(
+                code="CONFLICT",
+                message="No domain search has been completed for this project yet.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+
+        has_available = DomainResult.objects.filter(
+            project=project,
+            status=DomainResult.Status.AVAILABLE,
+        ).exists()
+        if not has_available:
+            return api_error(
+                code="VALIDATION_ERROR",
+                message="No available domains to recommend from yet.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        task_id = uuid.uuid4()
+        TaskRecord.objects.create(
+            task_id=task_id,
+            project=project,
+            status=TaskRecord.Status.PENDING,
+        )
+
+        recommend_domain_task.delay(str(task_id), str(project.id))
+
+        return Response(
+            {"task_id": str(task_id), "status": "PROCESSING"},
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class DomainRecommendationListView(APIView):
+    """
+    List AI domain recommendations for a project, newest first.
+    Frontend reads the first entry (latest by created_at) for the
+    "We'd pick X because Y" panel — same read pattern as brands/searches.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id):
+        project = get_object_or_404(
+            LaunchProject,
+            id=project_id,
+            user=request.user,
+        )
+
+        recommendations = DomainRecommendation.objects.filter(
+            project=project,
+        ).order_by("-created_at")
+
+        serializer = DomainRecommendationSerializer(recommendations, many=True)
+        return Response({"results": serializer.data})
+
+
+class DomainClaimsCheckView(APIView):
+    """
+    Kicks off an on-demand TMCH trademark-claims check for a single
+    domain result, as a background task. Ownership is enforced via
+    domain_result.project.user, since this endpoint hangs off
+    /domains/{id}/, not /projects/{id}/... — same pattern dns/views.py
+    already uses for CheckDomainView.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, domain_id):
+        domain_result = get_object_or_404(
+            DomainResult,
+            id=domain_id,
+            project__user=request.user,
+        )
+
+        task_id = uuid.uuid4()
+        TaskRecord.objects.create(
+            task_id=task_id,
+            project=domain_result.project,
+            status=TaskRecord.Status.PENDING,
+        )
+
+        check_domain_claims_task.delay(str(task_id), str(domain_result.id))
+
+        return Response(
+            {
+                "domain_id": str(domain_result.id),
+                "status": "PROCESSING",
+                "task_id": str(task_id),
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class DomainClaimListView(APIView):
+    """
+    List trademark claim checks for a domain result, newest first.
+    Same read pattern as DomainCheckListView in the dns app — frontend
+    reads the first entry (latest by checked_at) for the "has claims"
+    panel.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, domain_id):
+        domain_result = get_object_or_404(
+            DomainResult,
+            id=domain_id,
+            project__user=request.user,
+        )
+
+        claims = DomainClaim.objects.filter(
+            domain_result=domain_result,
+        ).order_by("-checked_at")
+
+        serializer = DomainClaimSerializer(claims, many=True)
+        return Response({"results": serializer.data})
