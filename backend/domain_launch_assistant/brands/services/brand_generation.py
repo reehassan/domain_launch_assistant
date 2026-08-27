@@ -3,8 +3,7 @@ from django.db import transaction
 from domain_launch_assistant.brands.models import BrandIdea
 from domain_launch_assistant.launches.models import LaunchProject
 
-from domain_launch_assistant.brands.clients.gemini import GeminiClient
-
+from domain_launch_assistant.core.integrations.gemini.client import GeminiClient
 
 class BrandGenerationError(Exception):
     """

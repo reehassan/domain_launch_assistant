@@ -3,7 +3,7 @@ from django.db import IntegrityError
 from celery import shared_task
 from rest_framework.renderers import JSONRenderer
 
-from domain_launch_assistant.brands.clients.gemini import GeminiClientError
+from domain_launch_assistant.core.integrations.gemini.client import GeminiClientError
 from domain_launch_assistant.brands.serializers import BrandIdeaSerializer
 from domain_launch_assistant.brands.services.brand_generation import (
     BrandGenerationError,

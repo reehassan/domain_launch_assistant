@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 # Local Project App Imports
-from domain_launch_assistant.brands.clients.gemini import GeminiClientError
+from domain_launch_assistant.core.integrations.gemini.client import GeminiClientError
 from domain_launch_assistant.brands.models import BrandIdea
 from domain_launch_assistant.brands.serializers import BrandIdeaSerializer
 from domain_launch_assistant.brands.services.brand_generation import (
