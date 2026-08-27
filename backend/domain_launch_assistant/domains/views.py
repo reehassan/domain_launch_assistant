@@ -46,6 +46,7 @@ from domain_launch_assistant.domains.tasks import (
     check_domain_claims_task,
     check_domains_task,
     recommend_domain_task,
+    simulate_registration_task,
 )
 from domain_launch_assistant.launches.models import LaunchProject
 from domain_launch_assistant.tasks.models import TaskRecord
@@ -379,3 +380,52 @@ class DomainClaimListView(APIView):
 
         serializer = DomainClaimSerializer(claims, many=True)
         return Response({"results": serializer.data})
+
+
+class DomainRegistrationSimulateView(APIView):
+    """
+    Kicks off the sandbox-only "Simulate Registration" demo action as a
+    background task. Ownership is enforced via domain_result.project.user,
+    same pattern as DomainClaimsCheckView — this endpoint hangs off
+    /domains/{id}/, not /projects/{id}/....
+
+    Gated on LaunchProject.status == READY (api-contract.md section 24):
+    the founder's project must have already passed launch readiness
+    before this demo action is available. No request body — the actual
+    provider call pulls purchase_price/purchase_type off the stored
+    DomainResult (populated back when the domain search ran).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, domain_id):
+        domain_result = get_object_or_404(
+            DomainResult,
+            id=domain_id,
+            project__user=request.user,
+        )
+
+        if domain_result.project.status != LaunchProject.Status.READY:
+            return api_error(
+                code="CONFLICT",
+                message="Simulate Registration is only available once the project is READY.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+
+        task_id = uuid.uuid4()
+        TaskRecord.objects.create(
+            task_id=task_id,
+            project=domain_result.project,
+            status=TaskRecord.Status.PENDING,
+        )
+
+        simulate_registration_task.delay(str(task_id), str(domain_result.id))
+
+        return Response(
+            {
+                "domain_id": str(domain_result.id),
+                "status": "PROCESSING",
+                "task_id": str(task_id),
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )

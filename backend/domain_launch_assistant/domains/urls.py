@@ -7,6 +7,7 @@ from domain_launch_assistant.domains.views import (
     DomainClaimsCheckView,
     DomainRecommendGenerateView,
     DomainRecommendationListView,
+    DomainRegistrationSimulateView,
     DomainResultListView,
     DomainSearchListView,
     DomainSearchStartView,
@@ -54,5 +55,10 @@ urlpatterns = [
         "domains/<uuid:domain_id>/claims/",
         DomainClaimListView.as_view(),
         name="domain-claims-list",
+    ),
+    path(
+        "domains/<uuid:domain_id>/simulate-registration/",
+        DomainRegistrationSimulateView.as_view(),
+        name="domain-registration-simulate",
     ),
 ]

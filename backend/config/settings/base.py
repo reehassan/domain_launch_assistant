@@ -203,6 +203,40 @@ DOMAIN_FRESHNESS_THRESHOLD_SECONDS = config(
     "DOMAIN_FRESHNESS_THRESHOLD_SECONDS", default=300, cast=int
 )
 
+# --- Simulate Registration (sandbox-only) — architecture.md section 19 ---
+# A completely separate credential pair from NAMECOM_USERNAME/NAMECOM_API_TOKEN
+# above, so a "sandbox" call can never accidentally be wired to production.
+# No default for username/token: these are real credentials and the app
+# should fail to boot without them, same discipline as NAMECOM_USERNAME.
+NAMECOM_TEST_USERNAME = config("NAMECOM_TEST_USERNAME")
+NAMECOM_TEST_API_TOKEN = config("NAMECOM_TEST_API_TOKEN")
+NAMECOM_TEST_BASE_URL = config(
+    "NAMECOM_TEST_BASE_URL", default="https://api.dev.name.com/core/v1"
+)
+# The hostname NAMECOM_TEST_BASE_URL must resolve to. DomainRegistrationSimulationService
+# refuses to construct a sandbox client at all if this doesn't match —
+# see domains/services/registration_simulation.py.
+NAMECOM_SANDBOX_HOST = "api.dev.name.com"
+
+# Fixed demo registrant contact used ONLY for the sandbox Simulate
+# Registration call. Not tied to any user, never persisted anywhere —
+# fictional placeholder data used to satisfy name.com's Create Domain
+# contact requirements in the sandbox environment. Safe to default (no
+# real PII); override in .env for a different demo persona if desired.
+NAMECOM_TEST_CONTACT_FIRST_NAME = config("NAMECOM_TEST_CONTACT_FIRST_NAME", default="Demo")
+NAMECOM_TEST_CONTACT_LAST_NAME = config("NAMECOM_TEST_CONTACT_LAST_NAME", default="Registrant")
+NAMECOM_TEST_CONTACT_ADDRESS1 = config(
+    "NAMECOM_TEST_CONTACT_ADDRESS1", default="123 Demo Street"
+)
+NAMECOM_TEST_CONTACT_CITY = config("NAMECOM_TEST_CONTACT_CITY", default="Denver")
+NAMECOM_TEST_CONTACT_STATE = config("NAMECOM_TEST_CONTACT_STATE", default="CO")
+NAMECOM_TEST_CONTACT_ZIP = config("NAMECOM_TEST_CONTACT_ZIP", default="80202")
+NAMECOM_TEST_CONTACT_COUNTRY = config("NAMECOM_TEST_CONTACT_COUNTRY", default="US")
+NAMECOM_TEST_CONTACT_EMAIL = config(
+    "NAMECOM_TEST_CONTACT_EMAIL", default="demo-registrant@example.com"
+)
+NAMECOM_TEST_CONTACT_PHONE = config("NAMECOM_TEST_CONTACT_PHONE", default="+13035555555")
+
 # Celery
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL

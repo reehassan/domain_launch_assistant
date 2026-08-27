@@ -17,7 +17,8 @@ class NameComClient:
     Knows nothing about Django models, DomainSearch, or DomainResult —
     it only translates between name.com's HTTP API and plain dicts,
     raising typed exceptions on failure. Application-level normalization
-    happens in services/availability.py and services/domain_claims.py.
+    happens in services/availability.py, services/domain_claims.py, and
+    services/registration_simulation.py.
     """
 
     def __init__(
@@ -126,5 +127,85 @@ class NameComClient:
 
         if "claims" not in data:
             raise NameComAPIError("name.com response missing 'claims'.")
+
+        return data
+
+    def register_domain(
+        self,
+        domain_name: str,
+        purchase_price,
+        purchase_type: str,
+        contact: dict,
+        years: int = 1,
+    ) -> dict:
+        """
+        Calls POST /domains — name.com's real Create Domain endpoint.
+        Whether this registers in production or in the sandbox depends
+        entirely on self.base_url; callers that need the sandbox-only
+        guarantee must go through DomainRegistrationSimulationService,
+        which refuses to construct a client at all unless self.base_url
+        resolves to the sandbox host.
+
+        `contact` must already be a fully-formed name.com contact dict
+        (firstName, lastName, address1, city, state, zip, country, email,
+        phone). It is reused for all four contact roles (registrant,
+        admin, tech, billing) — matches name.com's documented v4 Create
+        Domain payload shape, which Core v1 carries forward per its
+        changelog (POST/PUT contact schemas require the same fields).
+
+        purchase_price is cast to float before sending — DomainResult
+        stores it as a Decimal, which is not JSON-serializable by
+        `requests`' json= parameter.
+
+        Returns the raw response dict (the created Domain object).
+        ASSUMPTION — not verified against a real sandbox payload: Create
+        Domain's exact response shape wasn't available in name.com's
+        public docs at the time this was written. Callers should treat
+        any field access beyond `domainName` defensively — see
+        DomainRegistrationSimulationService's handling of `orderId`.
+
+        Raises NameComTimeoutError / NameComAPIError on any provider
+        failure, same discipline as the other methods on this client.
+        """
+        url = f"{self.base_url}/domains"
+
+        payload = {
+            "domain": {
+                "domainName": domain_name,
+                "contacts": {
+                    "registrant": contact,
+                    "admin": contact,
+                    "tech": contact,
+                    "billing": contact,
+                },
+            },
+            "purchasePrice": float(purchase_price) if purchase_price is not None else None,
+            "purchaseType": purchase_type,
+            "years": years,
+        }
+
+        try:
+            response = requests.post(
+                url,
+                json=payload,
+                auth=(self.username, self.token),
+                timeout=self.timeout,
+            )
+        except requests.Timeout as exc:
+            raise NameComTimeoutError("name.com did not respond in time.") from exc
+        except requests.RequestException as exc:
+            raise NameComAPIError(f"name.com request failed: {exc}") from exc
+
+        if response.status_code >= 500:
+            raise NameComAPIError(f"name.com returned server error {response.status_code}.")
+        if response.status_code >= 400:
+            raise NameComAPIError(
+                f"name.com returned client error {response.status_code}: {response.text}"
+            )
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise NameComAPIError("name.com returned an unparseable response.") from exc
 
         return data

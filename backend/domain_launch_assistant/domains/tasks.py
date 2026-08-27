@@ -29,6 +29,13 @@ from domain_launch_assistant.domains.services.domain_search import (
     DomainSearchService,
     DomainSearchTimeoutError,
 )
+from domain_launch_assistant.domains.services.registration_simulation import (
+    DomainRegistrationSimulationError,
+    DomainRegistrationSimulationGuardError,
+    DomainRegistrationSimulationProviderError,
+    DomainRegistrationSimulationService,
+    DomainRegistrationSimulationTimeoutError,
+)
 from domain_launch_assistant.launches.models import LaunchProject
 from domain_launch_assistant.tasks.models import TaskRecord
 
@@ -200,4 +207,61 @@ def recommend_domain_task(task_id: str, project_id: str) -> None:
     task.status = TaskRecord.Status.SUCCESS
     rendered = JSONRenderer().render(DomainRecommendationSerializer(recommendation).data)
     task.result = json.loads(rendered)
+    task.save(update_fields=["status", "result"])
+
+
+@shared_task
+def simulate_registration_task(task_id: str, domain_result_id: str) -> None:
+    """
+    Background counterpart of DomainRegistrationSimulateView.
+    domain_result_id points at an already-persisted DomainResult.
+    DomainRegistrationSimulationService builds its own sandbox-only
+    NameComClient internally — never the production client used by the
+    tasks above. Nothing is persisted beyond TaskRecord: no new model,
+    no LaunchProject.status change (data-model.md section 9).
+    """
+    task = TaskRecord.objects.get(task_id=task_id)
+    task.status = TaskRecord.Status.PROCESSING
+    task.save(update_fields=["status"])
+
+    domain_result = DomainResult.objects.get(id=domain_result_id)
+
+    try:
+        result = DomainRegistrationSimulationService().simulate_registration(domain_result)
+    except DomainRegistrationSimulationGuardError as exc:
+        # The sandbox/production guard tripped. This is a configuration
+        # safety violation, not a routine provider failure, so it must
+        # fail loudly with its own code rather than being folded into
+        # EXTERNAL_API_ERROR where it could be mistaken for a transient
+        # outage and retried.
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = str(exc)
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DomainRegistrationSimulationTimeoutError:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_TIMEOUT"
+        task.error_message = "The domain provider did not respond. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DomainRegistrationSimulationProviderError:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_ERROR"
+        task.error_message = "Sandbox registration is temporarily unavailable."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DomainRegistrationSimulationError as exc:
+        # Defensive catch-all for the base class, same pattern used by
+        # check_domain_claims_task's DomainClaimsError handler.
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_ERROR"
+        task.error_message = str(exc)
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+
+    task.status = TaskRecord.Status.SUCCESS
+    # Plain dict of JSON-primitive values (bool/str) — no model involved,
+    # so no serializer round-trip needed here (unlike the tasks above).
+    task.result = result
     task.save(update_fields=["status", "result"])
