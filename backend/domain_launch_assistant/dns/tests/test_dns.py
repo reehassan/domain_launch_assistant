@@ -59,8 +59,11 @@ class TestCheckDomain:
         readiness = checks.get(check_type=DomainCheck.CheckType.DOMAIN_READINESS)
         assert readiness.status == DomainCheck.Status.PASS
 
+        # Both requested checks PASSed, so the project must advance all
+        # the way to READY, not stop at VERIFYING_DNS — see
+        # TestDnsReadyTransition below for the partial-failure cases.
         project_a.refresh_from_db()
-        assert project_a.status == LaunchProject.Status.VERIFYING_DNS
+        assert project_a.status == LaunchProject.Status.READY
 
     def test_dns_resolution_no_record_is_fail_not_error(
         self, auth_client_a, project_a, domain_result_a
@@ -252,3 +255,87 @@ class TestListDomainChecks:
         client = APIClient()
         response = client.get(f"/api/v1/domains/{domain_result_a.id}/checks/")
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+class TestDnsReadyTransition:
+    """
+    Covers the READY-transition rule in run_domain_checks_task: the
+    project only advances to READY once every requested check type has
+    actually PASSed. This is the gate Feature 5 (Simulate Registration)
+    depends on — DomainRegistrationSimulateView 409s unless
+    project.status == READY.
+    """
+
+    def test_all_checks_pass_transitions_to_ready(
+        self, auth_client_a, project_a, domain_result_a
+    ):
+        project_a.selected_domain = domain_result_a
+        project_a.status = LaunchProject.Status.DOMAIN_SELECTED
+        project_a.save(update_fields=["selected_domain", "status"])
+
+        with _mock_dns_lookup() as mock_lookup:
+            mock_lookup.return_value = "203.0.113.10"
+            response = auth_client_a.post(
+                f"/api/v1/domains/{domain_result_a.id}/check/",
+                {"check_types": ["DNS_RESOLUTION", "DOMAIN_READINESS"]},
+                format="json",
+            )
+
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        project_a.refresh_from_db()
+        assert project_a.status == LaunchProject.Status.READY
+
+    def test_one_check_fails_stays_at_verifying_dns(
+        self, auth_client_a, project_a, domain_result_a
+    ):
+        # selected_domain deliberately left unset, so DOMAIN_READINESS
+        # will FAIL even though DNS_RESOLUTION PASSes.
+        with _mock_dns_lookup() as mock_lookup:
+            mock_lookup.return_value = "203.0.113.10"
+            response = auth_client_a.post(
+                f"/api/v1/domains/{domain_result_a.id}/check/",
+                {"check_types": ["DNS_RESOLUTION", "DOMAIN_READINESS"]},
+                format="json",
+            )
+
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        checks = DomainCheck.objects.filter(domain_result=domain_result_a)
+        assert checks.get(check_type=DomainCheck.CheckType.DOMAIN_READINESS).status == (
+            DomainCheck.Status.FAIL
+        )
+
+        project_a.refresh_from_db()
+        assert project_a.status == LaunchProject.Status.VERIFYING_DNS
+        assert project_a.status != LaunchProject.Status.READY
+
+    def test_check_error_stays_at_verifying_dns(
+        self, auth_client_a, project_a, domain_result_a
+    ):
+        project_a.selected_domain = domain_result_a
+        project_a.status = LaunchProject.Status.DOMAIN_SELECTED
+        project_a.save(update_fields=["selected_domain", "status"])
+
+        with _mock_dns_lookup() as mock_lookup:
+            mock_lookup.side_effect = OSError("network unreachable")
+            response = auth_client_a.post(
+                f"/api/v1/domains/{domain_result_a.id}/check/",
+                {"check_types": ["DNS_RESOLUTION", "DOMAIN_READINESS"]},
+                format="json",
+            )
+
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        checks = DomainCheck.objects.filter(domain_result=domain_result_a)
+        assert checks.get(check_type=DomainCheck.CheckType.DNS_RESOLUTION).status == (
+            DomainCheck.Status.ERROR
+        )
+        # DOMAIN_READINESS still PASSes here (domain is selected and
+        # available) — the point of this test is that ERROR on the
+        # *other* check is still enough to block READY. All-PASS means
+        # all, not "no FAILs".
+        assert checks.get(check_type=DomainCheck.CheckType.DOMAIN_READINESS).status == (
+            DomainCheck.Status.PASS
+        )
+
+        project_a.refresh_from_db()
+        assert project_a.status == LaunchProject.Status.VERIFYING_DNS
+        assert project_a.status != LaunchProject.Status.READY
