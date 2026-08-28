@@ -43,5 +43,21 @@ class TaskRecord(models.Model):
     class Meta:
         ordering = ["-created_at"]
 
+    @classmethod
+    def has_active_task(cls, project) -> bool:
+        """
+        True if this project has a TaskRecord still PENDING or
+        PROCESSING. Used by dispatch views to reject a second
+        generate/search/check/recommend/simulate call while one is
+        already in flight for the same project — prevents wasted
+        provider calls and, once regenerate performs a delete-then-
+        create, prevents one task's cleanup from racing another
+        task's writes.
+        """
+        return cls.objects.filter(
+            project=project,
+            status__in=[cls.Status.PENDING, cls.Status.PROCESSING],
+        ).exists()
+
     def __str__(self):
         return f"{self.task_id} ({self.status})"

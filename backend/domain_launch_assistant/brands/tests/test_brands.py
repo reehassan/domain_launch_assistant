@@ -1,3 +1,4 @@
+import uuid
 from unittest.mock import patch
 
 import pytest
@@ -137,16 +138,20 @@ class TestGenerateBrands:
         assert task.error_code == "BRAND_GENERATION_INVALID"
         assert BrandIdea.objects.filter(project=project_a).count() == 0
 
-    def test_generate_brands_duplicate_name_in_existing_project_marks_task_failed(
+    def test_generate_brands_deletes_prior_unselected_batch_before_generating(
         self, auth_client_a, project_a
     ):
         """
-        Regression test for the original bug #11: a name collision with a
-        brand already persisted for this project (case-insensitive) must
-        surface as a clean AI_GENERATION_FAILED task failure, not an
-        uncaught IntegrityError inside the worker.
+        Regenerate semantics: a prior unselected batch is deleted before
+        the new batch is generated, so a name reused by Gemini
+        (case-insensitive) must NOT collide with the old batch.
+        Supersedes the old version of this test, which asserted the
+        opposite (a collision correctly failing the task) — that was
+        masking bug #1: unique_brand_name_per_project_ci is project-wide,
+        not per-batch, so a real regenerate with a Gemini-repeated name
+        failed outright instead of succeeding.
         """
-        BrandIdea.objects.create(
+        old_brand = BrandIdea.objects.create(
             project=project_a,
             name="Balancely",
             description="already exists",
@@ -164,9 +169,64 @@ class TestGenerateBrands:
 
         assert response.status_code == status.HTTP_202_ACCEPTED
         task = TaskRecord.objects.get(task_id=response.data["task_id"])
-        assert task.status == TaskRecord.Status.FAILURE
-        assert task.error_code == "AI_GENERATION_FAILED"
+        assert task.status == TaskRecord.Status.SUCCESS
+        assert not BrandIdea.objects.filter(id=old_brand.id).exists()
         assert BrandIdea.objects.filter(project=project_a).count() == 1
+        assert BrandIdea.objects.get(project=project_a).name == "balancely"
+
+    def test_generate_brands_does_not_delete_selected_brand(
+        self, auth_client_a, project_a
+    ):
+        """
+        is_selected=True brands must survive regeneration — the delete-
+        before-generate filter explicitly excludes them. In practice
+        BrandGenerateView should be unreachable once a brand is selected
+        (frontend hides the button), but this guards the service-layer
+        invariant directly regardless of frontend state.
+        """
+        selected = BrandIdea.objects.create(
+            project=project_a,
+            name="KeepMe",
+            description="already selected",
+            is_selected=True,
+        )
+        with _mock_gemini() as MockClient:
+            instance = MockClient.return_value
+            instance.generate_brand_ideas.return_value = {
+                "brands": [{"name": "NewOne", "description": "fresh idea"}]
+            }
+            response = auth_client_a.post(
+                f"/api/v1/projects/{project_a.id}/generate-brands/",
+                {"count": 1},
+                format="json",
+            )
+
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.SUCCESS
+        selected.refresh_from_db()
+        assert selected.is_selected is True
+        assert BrandIdea.objects.filter(project=project_a).count() == 2
+
+    def test_generate_brands_active_task_returns_409(
+        self, auth_client_a, project_a
+    ):
+        """
+        A second generate-brands/ call while one is still PENDING/
+        PROCESSING for the same project must be rejected with 409, not
+        dispatch a second concurrent task.
+        """
+        TaskRecord.objects.create(
+            task_id=uuid.uuid4(),
+            project=project_a,
+            status=TaskRecord.Status.PROCESSING,
+        )
+        response = auth_client_a.post(
+            f"/api/v1/projects/{project_a.id}/generate-brands/",
+            {"count": 1},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_409_CONFLICT
 class TestListBrands:
     def test_list_brands_returns_only_this_projects_brands(self, auth_client_a, project_a, project_b):
         BrandIdea.objects.create(project=project_a, name="Mine", description="d")

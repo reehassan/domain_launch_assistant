@@ -5,6 +5,10 @@ from celery import shared_task
 from django.db import IntegrityError
 from rest_framework.renderers import JSONRenderer
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from domain_launch_assistant.core.integrations.gemini.client import GeminiClientError
 from domain_launch_assistant.core.services.domain_recommendation import (
     DomainRecommendationError,
@@ -90,6 +94,16 @@ def check_domains_task(task_id: str, search_id: str) -> None:
         task.error_message = "Domain search produced conflicting results. Please try again."
         task.save(update_fields=["status", "error_code", "error_message"])
         return
+    except Exception:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = "Something went wrong. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        logger.exception(
+            "Unhandled error in check_domains_task",
+            extra={"task_id": task_id, "search_id": search_id},
+        )
+        return
 
     task.status = TaskRecord.Status.SUCCESS
     # DomainResultSerializer has no PrimaryKeyRelatedField (unlike
@@ -154,6 +168,16 @@ def check_domain_claims_task(task_id: str, domain_result_id: str) -> None:
         task.error_message = "Trademark claims check produced conflicting results. Please try again."
         task.save(update_fields=["status", "error_code", "error_message"])
         return
+    except Exception:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = "Something went wrong. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        logger.exception(
+            "Unhandled error in check_domain_claims_task",
+            extra={"task_id": task_id, "domain_result_id": domain_result_id},
+        )
+        return
 
     task.status = TaskRecord.Status.SUCCESS
     rendered = JSONRenderer().render(DomainClaimSerializer(claim).data)
@@ -202,6 +226,16 @@ def recommend_domain_task(task_id: str, project_id: str) -> None:
         task.error_code = "AI_GENERATION_FAILED"
         task.error_message = "Domain recommendation produced conflicting results. Please try again."
         task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except Exception:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = "Something went wrong. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        logger.exception(
+            "Unhandled error in recommend_domain_task",
+            extra={"task_id": task_id, "project_id": project_id},
+        )
         return
 
     task.status = TaskRecord.Status.SUCCESS
@@ -258,6 +292,16 @@ def simulate_registration_task(task_id: str, domain_result_id: str) -> None:
         task.error_code = "EXTERNAL_API_ERROR"
         task.error_message = str(exc)
         task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except Exception:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = "Something went wrong. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        logger.exception(
+            "Unhandled error in simulate_registration_task",
+            extra={"task_id": task_id, "domain_result_id": domain_result_id},
+        )
         return
 
     task.status = TaskRecord.Status.SUCCESS

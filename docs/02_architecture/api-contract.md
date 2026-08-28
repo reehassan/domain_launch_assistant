@@ -505,6 +505,8 @@ Required.
 
 If omitted, the backend uses the configured default.
 
+> **Regenerate Brands:** the "Not loving these?" regenerate action in the UI calls this same endpoint again — there is no separate regenerate endpoint. Each call creates a new batch of `BrandIdea` rows; the frontend reads the latest batch by `created_at`.
+
 ### Response
 
 Because AI generation is asynchronous:
@@ -681,6 +683,8 @@ Required.
 
 `brand_idea_id` is required — every domain search must originate from a selected brand idea (matches `DomainSearch.brand_idea_id` in data-model.md).
 
+> **Regenerate Domains:** the "Not loving these?" regenerate action for domain results calls this same endpoint again with the same `brand_idea_id`/`extensions` — there is no separate regenerate endpoint.
+
 ### Response
 
 ```http
@@ -804,7 +808,11 @@ Optional:
       "available": true,
       "status": "AVAILABLE",
       "provider": "name.com",
-      "checked_at": "2026-08-22T14:10:04Z"
+      "checked_at": "2026-08-22T14:10:04Z",
+      "purchase_price": 69.99,
+      "renewal_price": 69.99,
+      "premium": false,
+      "purchase_type": "registration"
     },
     {
       "id": "uuid",
@@ -813,9 +821,174 @@ Optional:
       "available": false,
       "status": "TAKEN",
       "provider": "name.com",
-      "checked_at": "2026-08-22T14:10:04Z"
+      "checked_at": "2026-08-22T14:10:04Z",
+      "purchase_price": null,
+      "renewal_price": null,
+      "premium": null,
+      "purchase_type": null
     }
   ]
+}
+```
+
+`purchase_price`, `renewal_price`, `premium`, and `purchase_type` are populated directly from the existing `checkAvailability` call to name.com — no additional provider call is made. All four are nullable; `CHECK_FAILED` and `TAKEN` results will not have pricing.
+
+### Errors
+
+```text
+401 AUTHENTICATION_REQUIRED
+
+403 PERMISSION_DENIED
+
+404 NOT_FOUND
+```
+
+---
+
+# 18. Recommend Domain
+
+```http
+POST /api/v1/projects/{id}/recommend-domain/
+```
+
+Uses Gemini to pick the best of the project's currently `AVAILABLE` domain results and explain the choice.
+
+### Authentication
+
+Required.
+
+### Request
+
+No body. Uses the project's current `AVAILABLE` domain results.
+
+### Response
+
+Because AI generation is asynchronous:
+
+```http
+202 Accepted
+```
+
+```json
+{
+  "project_id": "uuid",
+  "status": "PROCESSING",
+  "task_id": "celery-task-id"
+}
+```
+
+Task result on `SUCCESS` (fetched via `GET /api/v1/tasks/{task_id}/`):
+
+```json
+{
+  "recommended_domain_id": "uuid",
+  "reasoning": "ledgerflow.ai is short, matches the brand exactly, and the .ai extension signals the product category."
+}
+```
+
+The result is persisted as a `DomainRecommendation` so it survives a page refresh. Regenerating (calling this endpoint again) creates a new `DomainRecommendation` row rather than overwriting the previous one; the frontend reads the latest by `created_at`, the same convention used for `BrandIdea` and `DomainSearch`.
+
+### Errors
+
+```text
+400 VALIDATION_ERROR        — no available domains yet
+
+401 AUTHENTICATION_REQUIRED
+
+403 PERMISSION_DENIED
+
+404 NOT_FOUND
+
+409 CONFLICT                — no domain search has completed
+```
+
+---
+
+# 19. Trademark Claims Check
+
+## 19.1 Check Domain Claims
+
+```http
+POST /api/v1/domains/{id}/check-claims/
+```
+
+Runs an on-demand check of a domain against the ICANN Trademark Clearinghouse via name.com.
+
+### Authentication
+
+Required.
+
+### Request
+
+No body.
+
+### Response
+
+```http
+202 Accepted
+```
+
+```json
+{
+  "domain_id": "uuid",
+  "status": "PROCESSING",
+  "task_id": "celery-task-id"
+}
+```
+
+Task result on `SUCCESS`:
+
+```json
+{
+  "has_claims": false,
+  "claims": []
+}
+```
+
+Each check creates a new `DomainClaim` row (append-only history, same pattern as `DomainCheck`) rather than overwriting a previous result.
+
+### Errors
+
+```text
+400 VALIDATION_ERROR
+
+401 AUTHENTICATION_REQUIRED
+
+403 PERMISSION_DENIED
+
+404 NOT_FOUND
+
+409 CONFLICT
+
+502 EXTERNAL_API_TIMEOUT
+
+503 EXTERNAL_API_ERROR
+```
+
+## 19.2 Get Domain Claims
+
+```http
+GET /api/v1/domains/{id}/claims/
+```
+
+Returns the most recent `DomainClaim` for the domain — same read pattern as `GET /api/v1/domains/{id}/checks/`.
+
+### Authentication
+
+Required.
+
+### Response
+
+```http
+200 OK
+```
+
+```json
+{
+  "id": "uuid",
+  "has_claims": false,
+  "claims_data": null,
+  "checked_at": "2026-08-22T14:20:00Z"
 }
 ```
 
@@ -831,7 +1004,7 @@ Optional:
 
 ---
 
-# 18. Select Domain
+# 20. Select Domain
 
 ```http
 POST /api/v1/projects/{id}/select-domain/
@@ -890,11 +1063,11 @@ The selected domain must:
 
 ---
 
-> **Note on the endpoints below:** `configure-dns/`, `check/`, and `checks/` are implemented by the `dns` Django app (see architecture.md section 4), even though they share the `/api/v1/domains/{id}/...` URL prefix used by the `domains` app's endpoints above. The shared prefix is a deliberate URL-design choice — from the client's perspective, a domain's DNS state is part of that domain resource — and does not imply the two Django apps are merged.
+> **Note on the endpoints below:** `configure-dns/`, `check/`, `checks/`, and `simulate-registration/` are implemented by Django apps other than `domains` (`dns` and, for simulate-registration, `domains`'s registration-simulation service), even though they share the `/api/v1/domains/{id}/...` URL prefix used by the `domains` app's endpoints above. The shared prefix is a deliberate URL-design choice — from the client's perspective, a domain's DNS state and registration actions are part of that domain resource — and does not imply the underlying app boundaries are merged.
 
 ---
 
-# 19. Configure DNS
+# 21. Configure DNS
 
 ```http
 POST /api/v1/domains/{id}/configure-dns/
@@ -980,7 +1153,7 @@ Once DNS is configured, call `POST /api/v1/domains/{id}/check/` (below) to verif
 
 ---
 
-# 20. Verify DNS / Domain Readiness
+# 22. Verify DNS / Domain Readiness
 
 ```http
 POST /api/v1/domains/{id}/check/
@@ -1054,7 +1227,7 @@ Calculate launch readiness
 
 ---
 
-# 21. Get Domain Checks
+# 23. Get Domain Checks
 
 ```http
 GET /api/v1/domains/{id}/checks/
@@ -1101,7 +1274,71 @@ Required.
 
 ---
 
-# 22. Get Launch Report
+# 24. Simulate Registration (sandbox-only)
+
+```http
+POST /api/v1/domains/{id}/simulate-registration/
+```
+
+Calls name.com's real `Create Domain` endpoint against the **test/sandbox environment only**, to prove the registration flow works without spending real money or registering a real domain. Available once the domain has passed launch readiness (`LaunchProject.status = READY`).
+
+### Authentication
+
+Required.
+
+### Request
+
+No body — the service pulls `purchase_price`/`purchase_type` off the stored `DomainResult`.
+
+### Response
+
+```http
+202 Accepted
+```
+
+```json
+{
+  "domain_id": "uuid",
+  "status": "PROCESSING",
+  "task_id": "celery-task-id"
+}
+```
+
+Task result on `SUCCESS`:
+
+```json
+{
+  "simulated": true,
+  "order_id": "sandbox-order-id",
+  "message": "Registered in name.com sandbox — no real domain or charge."
+}
+```
+
+**Contract rule:** Simulate Registration must only ever call name.com's test/sandbox base URL. The client must refuse to run if configured against the production base URL. See `architecture.md` §19 — `DomainRegistrationSimulationService` must construct its own `NameComClient` from `NAMECOM_TEST_*` settings and must never reuse the production client instance.
+
+### Errors
+
+```text
+400 VALIDATION_ERROR
+
+401 AUTHENTICATION_REQUIRED
+
+403 PERMISSION_DENIED
+
+404 NOT_FOUND
+
+409 CONFLICT
+
+502 EXTERNAL_API_TIMEOUT
+
+503 EXTERNAL_API_ERROR
+```
+
+> **Buy on name.com** has no corresponding backend endpoint. It is a frontend-only outbound `<a href>` built from `project.selected_domain.domain`, linking to name.com's real search page. Nothing is added to this contract for it.
+
+---
+
+# 25. Get Launch Report
 
 ```http
 GET /api/v1/projects/{id}/launch-report/
@@ -1173,7 +1410,7 @@ If the project is not ready:
 
 ---
 
-# 23. Background Task Status
+# 26. Background Task Status
 
 React needs a way to determine whether asynchronous operations have completed.
 
@@ -1221,34 +1458,38 @@ Required.
 
 ---
 
-# 24. Endpoint Summary
+# 27. Endpoint Summary
 
-| Method | Endpoint                                 | Purpose                    | Async |
-| ------ | ----------------------------------------- | --------------------------- | ----- |
-| `POST` | `/api/v1/auth/register/`                 | Register user              | No    |
-| `POST` | `/api/v1/auth/login/`                    | Authenticate user          | No    |
-| `POST` | `/api/v1/auth/token/refresh/`            | Refresh access token       | No    |
-| `POST` | `/api/v1/auth/logout/`                   | Logout                     | No    |
-| `GET`  | `/api/v1/auth/me/`                       | Get current user           | No    |
-| `POST` | `/api/v1/projects/`                      | Create project             | No    |
-| `GET`  | `/api/v1/projects/`                      | List projects              | No    |
-| `GET`  | `/api/v1/projects/{id}/`                 | Get project                | No    |
-| `POST` | `/api/v1/projects/{id}/generate-brands/` | Generate AI brands         | Yes   |
-| `GET`  | `/api/v1/projects/{id}/brands/`          | Get brands                 | No    |
-| `POST` | `/api/v1/projects/{id}/select-brand/`    | Select brand               | No    |
-| `POST` | `/api/v1/projects/{id}/domain-search/`   | Search domains             | Yes   |
-| `GET`  | `/api/v1/projects/{id}/domain-searches/` | Search history             | No    |
-| `GET`  | `/api/v1/projects/{id}/domains/`         | Get domain results         | No    |
-| `POST` | `/api/v1/projects/{id}/select-domain/`   | Select domain              | No    |
-| `POST` | `/api/v1/domains/{id}/configure-dns/`    | Configure DNS records      | Yes   |
-| `POST` | `/api/v1/domains/{id}/check/`            | Verify DNS/domain          | Yes   |
-| `GET`  | `/api/v1/domains/{id}/checks/`           | Get domain checks          | No    |
-| `GET`  | `/api/v1/projects/{id}/launch-report/`   | Get launch report          | No    |
-| `GET`  | `/api/v1/tasks/{task_id}/`               | Get background task status | No    |
+| Method | Endpoint                                        | Purpose                       | Async |
+| ------ | ------------------------------------------------ | ------------------------------ | ----- |
+| `POST` | `/api/v1/auth/register/`                         | Register user                  | No    |
+| `POST` | `/api/v1/auth/login/`                            | Authenticate user               | No    |
+| `POST` | `/api/v1/auth/token/refresh/`                    | Refresh access token            | No    |
+| `POST` | `/api/v1/auth/logout/`                           | Logout                          | No    |
+| `GET`  | `/api/v1/auth/me/`                               | Get current user                | No    |
+| `POST` | `/api/v1/projects/`                              | Create project                  | No    |
+| `GET`  | `/api/v1/projects/`                              | List projects                   | No    |
+| `GET`  | `/api/v1/projects/{id}/`                         | Get project                     | No    |
+| `POST` | `/api/v1/projects/{id}/generate-brands/`         | Generate AI brands (also used to regenerate) | Yes   |
+| `GET`  | `/api/v1/projects/{id}/brands/`                  | Get brands                      | No    |
+| `POST` | `/api/v1/projects/{id}/select-brand/`            | Select brand                    | No    |
+| `POST` | `/api/v1/projects/{id}/domain-search/`           | Search domains (also used to regenerate) | Yes   |
+| `GET`  | `/api/v1/projects/{id}/domain-searches/`         | Search history                  | No    |
+| `GET`  | `/api/v1/projects/{id}/domains/`                 | Get domain results (now incl. pricing) | No    |
+| `POST` | `/api/v1/projects/{id}/recommend-domain/`        | AI picks best available domain  | Yes   |
+| `POST` | `/api/v1/domains/{id}/check-claims/`             | Trademark claims check          | Yes   |
+| `GET`  | `/api/v1/domains/{id}/claims/`                   | Get latest claims result        | No    |
+| `POST` | `/api/v1/projects/{id}/select-domain/`           | Select domain                   | No    |
+| `POST` | `/api/v1/domains/{id}/configure-dns/`            | Configure DNS records            | Yes   |
+| `POST` | `/api/v1/domains/{id}/check/`                    | Verify DNS/domain                | Yes   |
+| `GET`  | `/api/v1/domains/{id}/checks/`                   | Get domain checks                | No    |
+| `POST` | `/api/v1/domains/{id}/simulate-registration/`    | Sandbox-only registration demo   | Yes   |
+| `GET`  | `/api/v1/projects/{id}/launch-report/`           | Get launch report                | No    |
+| `GET`  | `/api/v1/tasks/{task_id}/`                       | Get background task status       | No    |
 
 ---
 
-# 25. Authentication and Ownership Rules
+# 28. Authentication and Ownership Rules
 
 Every protected endpoint must verify:
 
@@ -1274,6 +1515,10 @@ DomainSearch.project.user == request.user
 DomainResult.project.user == request.user
 
 DomainCheck.project.user == request.user
+
+DomainClaim.domain_result.project.user == request.user
+
+DomainRecommendation.project.user == request.user
 ```
 
 The API must never rely on React to enforce ownership.
@@ -1282,7 +1527,7 @@ Authorization is always enforced by Django.
 
 ---
 
-# 26. External API Failure Contract
+# 29. External API Failure Contract
 
 External provider failures must be normalized into application-level errors.
 
@@ -1316,11 +1561,11 @@ External provider failures must be normalized into application-level errors.
 }
 ```
 
-The API must **not** expose raw provider responses or credentials.
+The API must **not** expose raw provider responses or credentials. This applies equally to the claims-check and simulate-registration endpoints.
 
 ---
 
-# 27. AI Failure Contract
+# 30. AI Failure Contract
 
 If Gemini returns invalid structured data:
 
@@ -1349,11 +1594,11 @@ Response:
 }
 ```
 
-Invalid AI output must never be stored as a valid `BrandIdea`.
+Invalid AI output must never be stored as a valid `BrandIdea`. The same rule applies to `POST /api/v1/projects/{id}/recommend-domain/`: invalid or unschema'd Gemini output must never be persisted as a `DomainRecommendation`.
 
 ---
 
-# 28. Important API Rules
+# 31. Important API Rules
 
 The API must enforce the following rules:
 
@@ -1372,10 +1617,11 @@ The API must enforce the following rules:
 13. Protected endpoints require a valid JWT access token.
 14. Access tokens must not be accepted from unauthenticated requests.
 15. API routes must remain versioned under `/api/v1/`.
+16. Simulate Registration must only ever call name.com's test/sandbox base URL. The client must refuse to run if configured against the production base URL.
 
 ---
 
-# 29. Complete Application Flow
+# 32. Complete Application Flow
 
 ```text
 React
@@ -1387,7 +1633,7 @@ Django
   ↓
 LaunchProject
   │
-  │ POST /api/v1/projects/{id}/generate-brands/
+  │ POST /api/v1/projects/{id}/generate-brands/  (also: regenerate)
   ↓
 Celery
   │
@@ -1397,7 +1643,7 @@ Gemini
   ↓
 BrandIdea[]
   │
-  │ POST /api/v1/projects/{id}/domain-search/
+  │ POST /api/v1/projects/{id}/domain-search/  (also: regenerate)
   ↓
 Celery
   │
@@ -1405,7 +1651,10 @@ Celery
 name.com
   │
   ↓
-DomainResult[]
+DomainResult[]  (now includes purchase_price / renewal_price / premium)
+  │
+  ├── POST /api/v1/projects/{id}/recommend-domain/  → Gemini → DomainRecommendation
+  ├── POST /api/v1/domains/{id}/check-claims/        → name.com → DomainClaim
   │
   │ POST /api/v1/projects/{id}/select-domain/
   ↓
@@ -1437,17 +1686,19 @@ LaunchReadinessService
         ↓
       READY
         │
+        ├── POST /api/v1/domains/{id}/simulate-registration/  (sandbox only)
+        │
         │ GET /api/v1/projects/{id}/launch-report/
         ↓
       React
         │
         ↓
-  Launch-ready UI
+  Launch-ready UI — incl. "Buy on name.com" outbound link (frontend-only)
 ```
 
 ---
 
-# 30. React Integration
+# 33. React Integration
 
 The React frontend is an API consumer.
 

@@ -1,16 +1,11 @@
 # domain_launch_assistant/launches/serializers.py
 from rest_framework import serializers
-
 from domain_launch_assistant.brands.serializers import BrandIdeaSerializer
-
+from domain_launch_assistant.domains.serializers import DomainResultSerializer
 from .models import LaunchProject
-
-
 class LaunchProjectSerializer(serializers.ModelSerializer):
     selected_brand = BrandIdeaSerializer(read_only=True)
-    # `domains` app doesn't exist yet — always null until it's built.
-    selected_domain = serializers.SerializerMethodField()
-
+    selected_domain = DomainResultSerializer(read_only=True)
     class Meta:
         model = LaunchProject
         fields = [
@@ -31,6 +26,3 @@ class LaunchProjectSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-
-    def get_selected_domain(self, obj):
-        return None

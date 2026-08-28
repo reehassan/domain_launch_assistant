@@ -13,8 +13,8 @@ The system uses:
 - **PostgreSQL** for persistent data
 - **Redis** for caching and Celery messaging
 - **Celery** for background jobs
-- **Gemini 3.5 Flash-Lite** for AI-powered brand generation
-- **name.com API** for domain availability and DNS operations
+- **Gemini 3.5 Flash-Lite** for AI-powered brand generation and domain recommendation
+- **name.com API** for domain availability, pricing, trademark claims, DNS operations, and sandbox registration
 - **Oracle Cloud Compute** for deployment
 - **Docker** for application packaging
 
@@ -52,7 +52,9 @@ The architecture deliberately avoids microservices. A modular monolith provides 
                 ┌─────────────────┐       ┌─────────────────┐
                 │ Gemini 3.5       │       │    name.com     │
                 │ Flash-Lite       │       │      API        │
-                │                  │       │ Domain + DNS    │
+                │                  │       │ Domain + DNS +  │
+                │                  │       │ Pricing/Claims/ │
+                │                  │       │ Sandbox Reg.    │
                 └─────────────────┘       └────────┬────────┘
                                                    │
                                                    ↓
@@ -155,6 +157,9 @@ domain-launch-assistant/
 │   ├── domains/
 │   ├── dns/
 │   └── core/
+│       └── integrations/
+│           └── gemini/
+│               └── client.py
 │
 ├── tests/
 │
@@ -192,13 +197,15 @@ The backend is divided into focused Django apps.
 | `users`    | User identity and profile data       | `User`                          |
 | `launches` | Core launch-project workflow        | `LaunchProject`                |
 | `brands`   | AI-generated brand ideas            | `BrandIdea`                    |
-| `domains`  | Domain searches and availability    | `DomainSearch`, `DomainResult` |
+| `domains`  | Domain searches, availability, pricing, AI recommendation, trademark claims, and sandbox registration simulation | `DomainSearch`, `DomainResult`, `DomainRecommendation`, `DomainClaim` |
 | `dns`      | DNS configuration and verification  | `DomainCheck`                  |
-| `core`     | Shared utilities and infrastructure | Shared/base models             |
+| `core`     | Shared utilities and infrastructure, including the shared `GeminiClient` | Shared/base models             |
 
 The apps represent business domains rather than technical layers.
 
-> **Note on URL structure:** although `domains` and `dns` are separate Django apps, the public API groups their endpoints under a shared `/api/v1/domains/{id}/...` URL prefix (see api-contract.md sections 19–21: `configure-dns/`, `check/`, `checks/`) rather than giving `dns` its own `/api/v1/dns/...` prefix. This is a deliberate client-facing choice — from the frontend's perspective, a domain's DNS state is part of that domain resource — and does not change the app boundary: the `dns` app's views are simply registered under the shared `domains/{id}/` URL path in `config/api_router.py`.
+> **Note on URL structure:** although `domains` and `dns` are separate Django apps, the public API groups their endpoints under a shared `/api/v1/domains/{id}/...` URL prefix (see api-contract.md: `configure-dns/`, `check/`, `checks/`, `simulate-registration/`) rather than giving `dns` its own `/api/v1/dns/...` prefix. This is a deliberate client-facing choice — from the frontend's perspective, a domain's DNS state and registration actions are part of that domain resource — and does not change the app boundary: the `dns` app's views are simply registered under the shared `domains/{id}/` URL path in `config/api_router.py`. `simulate-registration/` is registered the same way, but its view lives in `domains`.
+
+> **Note on `GeminiClient` ownership:** `GeminiClient` originally lived under `brands/clients/gemini.py`, owned by the `brands` app. Once `DomainRecommendationService` (in the `domains` app) also needed Gemini access, that ownership stopped being accurate — `core` already exists specifically to hold "shared utilities and infrastructure" (this section), so `GeminiClient` moves to `core/integrations/gemini/client.py`. Both `brands` and `domains` import it from there. This is decided now, before `DomainRecommendationService` is implemented, rather than having `domains` reach across into `brands` and needing to migrate the import later.
 
 ---
 
@@ -231,7 +238,12 @@ React is responsible for:
 * Loading states
 * Error states
 * Displaying generated brands
-* Displaying domain availability
+* Displaying domain availability, live pricing, and premium status
+* Regenerate Brands / Regenerate Domains actions (calling the existing generate/search endpoints again)
+* Displaying the AI domain recommendation and reasoning
+* Displaying trademark claims results
+* Sandbox "Simulate Registration" demo action
+* Outbound "Buy on name.com" link
 * DNS configuration UI
 * Launch-readiness dashboard
 
@@ -259,7 +271,7 @@ The interface should prioritize:
 
 * Clear workflow states
 * Strong visual hierarchy
-* Domain availability indicators
+* Domain availability indicators, including live pricing and premium flags
 * Launch-readiness checklist
 * Responsive layout
 * Fast feedback during API operations
@@ -318,8 +330,12 @@ User
        ├── DomainSearch
        │      │
        │      └── DomainResult
+       │              │
+       │              └── DomainClaim
        │
-       └── DomainCheck
+       ├── DomainCheck
+       │
+       └── DomainRecommendation
 ```
 
 ### User
@@ -371,6 +387,7 @@ Stores:
 * Extension
 * Availability
 * Provider response metadata
+* Discovery pricing (`purchase_price`, `renewal_price`, `premium`, `purchase_type`)
 * Timestamp
 
 ### DomainCheck
@@ -385,21 +402,48 @@ Stores:
 * Result
 * Timestamp
 
+### DomainClaim
+
+Represents one on-demand Trademark Clearinghouse (TMCH) claims check for a domain result.
+
+Stores:
+
+* Domain result
+* Whether claims matched
+* Raw claim data
+* Timestamp
+
+### DomainRecommendation
+
+Represents one AI-generated pick of the best available domain result, with reasoning.
+
+Stores:
+
+* Project
+* Recommended domain result
+* Reasoning
+* Timestamp
+
 ---
 
 # 8. Service Layer
 
 Business logic will be implemented through application services.
 
-| Service                     | Responsibility            | External Dependency |
-| ---------------------------- | -------------------------- | -------------------- |
-| `BrandGenerationService`    | Generate brand names      | Gemini               |
-| `DomainCandidateService`    | Create domain candidates  | Internal             |
-| `DomainAvailabilityService` | Check domain availability | name.com             |
-| `DomainSelectionService`    | Select a domain           | Internal             |
-| `DNSConfigurationService`   | Configure DNS             | name.com             |
-| `DNSVerificationService`    | Verify DNS state          | DNS / name.com       |
-| `LaunchReadinessService`    | Calculate launch status   | Internal             |
+| Service                               | Responsibility                                              | External Dependency |
+| --------------------------------------- | -------------------------------------------------------------- | ---------------------- |
+| `BrandGenerationService`              | Generate brand names (also powers Regenerate Brands)         | Gemini                |
+| `DomainCandidateService`              | Create domain candidates                                     | Internal               |
+| `DomainAvailabilityService`           | Check domain availability (also powers Regenerate Domains), and captures discovery pricing (`purchasePrice`, `renewalPrice`, `premium`) already present in the provider response | name.com |
+| `DomainRecommendationService`         | Pick + explain the best available domain                      | Gemini                |
+| `DomainClaimsService`                 | Trademark claims check                                        | name.com               |
+| `DomainSelectionService`              | Select a domain                                               | Internal               |
+| `DomainRegistrationSimulationService` | Sandbox-only registration demo                                 | name.com (sandbox)     |
+| `DNSConfigurationService`             | Configure DNS                                                  | name.com               |
+| `DNSVerificationService`              | Verify DNS state                                                | DNS / name.com         |
+| `LaunchReadinessService`              | Calculate launch status                                         | Internal               |
+
+There is no separate service for "Regenerate Brands"/"Regenerate Domains" or "Buy on name.com" — the former two simply re-invoke `BrandGenerationService`/`DomainAvailabilityService` through their existing endpoints, and the latter is a frontend-only outbound link with no service involved.
 
 API views should remain thin.
 
@@ -432,44 +476,46 @@ The view should not contain:
 
 The AI provider is **Gemini 3.5 Flash-Lite**.
 
-Gemini is responsible primarily for:
+Gemini is responsible for:
 
 * Understanding the business description
 * Generating brand names
 * Explaining why names fit
 * Producing structured brand suggestions
+* Ranking available domain results and producing a short natural-language justification for one recommended pick (`DomainRecommendationService`)
 
 Architecture:
 
 ```text
-BrandGenerationService
-        ↓
-GeminiClient
-        ↓
-Gemini 3.5 Flash-Lite
-        ↓
-Structured AI Response
-        ↓
-Validation
-        ↓
-BrandIdea
+BrandGenerationService              DomainRecommendationService
+        ↓                                       ↓
+        └───────────────→ GeminiClient ←────────┘
+                                ↓
+                    Gemini 3.5 Flash-Lite
+                                ↓
+                    Structured AI Response
+                                ↓
+                          Validation
+                          ↙          ↘
+                  BrandIdea     DomainRecommendation
 ```
 
-The AI client is isolated from business logic:
+The AI client is isolated from business logic and lives in `core`, shared by both `brands` and `domains`:
 
 ```text
-integrations/
-└── gemini/
-    └── client.py
+core/
+└── integrations/
+    └── gemini/
+        └── client.py
 ```
 
 The API key is stored as an environment variable and never committed to source control.
 
-AI output must be validated before it is stored.
+AI output must be validated before it is stored. Same validation discipline applies to `DomainRecommendationService`: AI output must be schema-validated before being persisted as a `DomainRecommendation`.
 
 AI is responsible for **creative generation and reasoning**.
 
-It is not responsible for determining real domain availability.
+It is not responsible for determining real domain availability, pricing, or trademark status.
 
 ---
 
@@ -483,6 +529,9 @@ Primary responsibilities:
 
 * Domain availability checks
 * Domain information
+* Discovery pricing (already part of the availability response, now surfaced to the frontend)
+* Trademark Clearinghouse claims check
+* Sandbox-only registration simulation (**never production** — see section 19)
 * DNS operations
 * DNS record configuration where supported
 * Domain/DNS status
@@ -495,6 +544,18 @@ DomainAvailabilityService
 NameComClient
         ↓
 name.com API
+
+DomainClaimsService
+        ↓
+NameComClient
+        ↓
+name.com API
+
+DomainRegistrationSimulationService
+        ↓
+NameComClient (constructed from NAMECOM_TEST_* settings — a separate instance)
+        ↓
+name.com API (sandbox base URL only)
 ```
 
 DNS:
@@ -512,6 +573,8 @@ DNS
 All name.com communication must go through dedicated integration clients.
 
 The rest of the application should not depend directly on name.com's HTTP implementation.
+
+`DomainAvailabilityService` and `DomainClaimsService` share the production `NameComClient` instance. `DomainRegistrationSimulationService` must never reuse that instance — see section 19 for why this is a hard requirement rather than a style preference.
 
 ---
 
@@ -547,6 +610,8 @@ Authorization must ensure that users can only access their own:
 * Brand ideas
 * Domain searches
 * Domain results
+* Domain claims checks
+* Domain recommendations
 * DNS checks
 
 Object ownership must always be checked server-side.
@@ -579,13 +644,16 @@ PostgreSQL
 
 Potential tasks:
 
-| Task                    | Purpose                          |
-| ------------------------ | ---------------------------------- |
-| `generate_brand_ideas`  | Generate AI brand suggestions    |
-| `check_domains`         | Check multiple domains           |
-| `configure_dns`         | Configure DNS records            |
-| `verify_dns`            | Verify DNS readiness             |
-| `refresh_domain_status` | Refresh stale domain information |
+| Task                     | Purpose                                    |
+| -------------------------- | --------------------------------------------- |
+| `generate_brand_ideas`   | Generate AI brand suggestions (also used by Regenerate Brands) |
+| `check_domains`          | Check multiple domains (also used by Regenerate Domains) |
+| `recommend_domain`       | AI pick + reasoning over available results  |
+| `check_domain_claims`    | Trademark claims check                       |
+| `configure_dns`          | Configure DNS records                        |
+| `verify_dns`             | Verify DNS readiness                         |
+| `refresh_domain_status`  | Refresh stale domain information             |
+| `simulate_registration`  | Sandbox-only Create Domain call              |
 
 The React frontend can poll a status endpoint while background jobs are running.
 
@@ -623,7 +691,7 @@ Potential cached information includes:
 domain:availability:{domain}
 ```
 
-Availability results should have a short TTL because domain availability can change.
+Availability results should have a short TTL because domain availability (and pricing) can change.
 
 ### AI Generation
 
@@ -635,7 +703,7 @@ brand:generation:{request_hash}
 
 ### Temporary Job State
 
-Redis may also store short-lived background-job information.
+Redis may also store short-lived background-job information, including for `recommend_domain`, `check_domain_claims`, and `simulate_registration`.
 
 PostgreSQL remains the source of truth for persistent application data.
 
@@ -651,12 +719,16 @@ It stores:
 * Launch projects
 * Brand ideas
 * Domain searches
-* Domain results
+* Domain results, including discovery pricing
 * Selected domains
+* Trademark claims history
+* AI domain recommendations
 * DNS checks
 * Launch readiness state
 
 The database preserves workflow state even when external APIs are temporarily unavailable.
+
+Sandbox registration simulations are **not** persisted as a distinct model — they are demo actions logged only through the existing task/`TaskRecord` mechanism (see data-model.md section 9), since they don't represent a real, durable "domain registered" fact.
 
 ---
 
@@ -673,7 +745,7 @@ Django REST API
    ↓
 Create LaunchProject
    ↓
-BrandGenerationService
+BrandGenerationService  ←── Regenerate Brands re-calls this
    ↓
 Gemini 3.5 Flash-Lite
    ↓
@@ -683,11 +755,14 @@ DomainCandidateService
    ↓
 Domain Candidates
    ↓
-DomainAvailabilityService
+DomainAvailabilityService  ←── Regenerate Domains re-calls this
    ↓
 name.com API
    ↓
-Real-Time Availability
+Real-Time Availability + Pricing
+   │
+   ├── DomainRecommendationService → Gemini → DomainRecommendation
+   ├── DomainClaimsService → name.com → DomainClaim
    ↓
 Founder Selects Domain
    ↓
@@ -700,6 +775,9 @@ DNSVerificationService
 LaunchReadinessService
    ↓
 LAUNCH READY
+   │
+   ├── DomainRegistrationSimulationService → name.com (sandbox only)
+   └── "Buy on name.com" → outbound link (frontend-only)
 ```
 
 ---
@@ -745,6 +823,8 @@ API timeout
 Domain = Taken
 ```
 
+This applies equally to the new `DomainClaimsService` and `DomainRegistrationSimulationService` calls — a name.com timeout on a claims check or a sandbox registration attempt must surface as `EXTERNAL_API_TIMEOUT`/`EXTERNAL_API_ERROR`, never as a false negative/positive result.
+
 ---
 
 # 17. Deployment Architecture
@@ -762,8 +842,8 @@ Docker containers will provide reproducible application environments.
 | Worker            | Celery                | Background processing           |
 | Database          | PostgreSQL            | Persistent data                 |
 | Cache/Broker      | Redis                 | Caching and Celery messaging    |
-| AI Provider       | Gemini 3.5 Flash-Lite | Brand generation                |
-| Domain Provider   | name.com API          | Domain and DNS operations       |
+| AI Provider       | Gemini 3.5 Flash-Lite | Brand generation, domain recommendation |
+| Domain Provider   | name.com API          | Domain, pricing, claims, DNS, and sandbox registration operations |
 | Container Runtime | Docker                | Application packaging           |
 | TLS               | Let's Encrypt / Nginx | HTTPS                           |
 | Source Control    | Git                   | Version control                 |
@@ -794,6 +874,8 @@ Deployment topology:
                                          ┌──────────┴──────────┐
                                          ↓                     ↓
                                       Gemini                name.com
+                                                          (production +
+                                                          sandbox base URLs)
 ```
 
 ---
@@ -856,6 +938,16 @@ NAMECOM_API_TOKEN
 JWT_SIGNING_KEY
 ```
 
+Simulate Registration requires its own, separate sandbox credentials — distinct from the production credentials above — so that a "sandbox" call can never accidentally be wired to the live client:
+
+```text
+NAMECOM_TEST_USERNAME
+NAMECOM_TEST_API_TOKEN
+NAMECOM_TEST_BASE_URL   # must resolve to api.dev.name.com
+```
+
+`DomainRegistrationSimulationService` must construct its own `NameComClient` instance from the `NAMECOM_TEST_*` settings — it must never reuse the production client instance used by `DomainAvailabilityService` or `DomainClaimsService`. This is the actual safety mechanism, not just a naming convention: a shared client instance is exactly how a "sandbox" call ends up hitting production. The client must also refuse to run if `NAMECOM_TEST_BASE_URL` resolves to a non-sandbox host.
+
 Secrets must:
 
 * Never be committed to Git
@@ -874,7 +966,7 @@ Recommended public access:
 
 Database, Redis, and internal application ports must not be publicly exposed.
 
-The Gemini and name.com credentials must remain server-side and must never be sent to React.
+The Gemini and name.com credentials (both production and sandbox) must remain server-side and must never be sent to React.
 
 ---
 
@@ -890,7 +982,8 @@ Test:
 * Business rules
 * Domain validation
 * Launch readiness logic
-* AI response validation
+* AI response validation, including `DomainRecommendationService` schema validation
+* `DomainRegistrationSimulationService` refuses to run against a non-sandbox base URL
 
 ### API Tests
 
@@ -902,15 +995,16 @@ Test:
 * HTTP status codes
 * Permissions
 * Complete API workflows
+* `recommend-domain/`, `check-claims/`, and `simulate-registration/` endpoints
 
 ### Integration Tests
 
 Test:
 
-* Gemini client
-* name.com client
+* Gemini client (shared from `core`)
+* name.com client — both the production client and the sandbox-only client used for registration simulation
 * Database interactions
-* Celery tasks
+* Celery tasks, including `recommend_domain`, `check_domain_claims`, and `simulate_registration`
 
 External APIs should normally be mocked in automated tests.
 
@@ -932,6 +1026,8 @@ Select domain
 Configure DNS
     ↓
 Verify readiness
+    ↓
+Simulate registration (sandbox)
 ```
 
 The final hackathon demonstration should use real external integrations.
@@ -940,24 +1036,26 @@ The final hackathon demonstration should use real external integrations.
 
 # 21. Architectural Decisions
 
-| Decision         | Choice                | Reason                                  |
-| ------------------ | ---------------------- | ------------------------------------------ |
-| Backend          | Django                | Strong Python backend foundation        |
-| Project Template | Cookiecutter Django   | Production-oriented starting structure  |
-| API              | Django REST Framework | API-first backend boundary              |
-| Frontend         | React                 | Natural client for REST API             |
-| CSS              | Tailwind CSS          | Rapid polished UI development           |
-| Architecture     | Modular monolith      | Simple and maintainable                 |
-| AI               | Gemini 3.5 Flash-Lite | Fast, cost-efficient AI generation      |
-| Domain API       | name.com              | Core hackathon integration              |
-| Database         | PostgreSQL            | Reliable relational persistence         |
-| Background Jobs  | Celery                | Handles slow external operations        |
-| Cache/Broker     | Redis                 | Caching + Celery messaging              |
-| Deployment       | Oracle Cloud Compute  | Cloud-hosted deployment                 |
-| Containers       | Docker                | Reproducible deployment                 |
-| Web Server       | Gunicorn + Nginx      | Production-style serving                |
-| Authentication   | JWT                   | Appropriate for separate React frontend |
-| Microservices    | Not used              | Unnecessary complexity for MVP          |
+| Decision              | Choice                          | Reason                                        |
+| ----------------------- | ---------------------------------- | -------------------------------------------------- |
+| Backend               | Django                            | Strong Python backend foundation                 |
+| Project Template      | Cookiecutter Django               | Production-oriented starting structure           |
+| API                   | Django REST Framework             | API-first backend boundary                        |
+| Frontend              | React                              | Natural client for REST API                       |
+| CSS                   | Tailwind CSS                       | Rapid polished UI development                     |
+| Architecture          | Modular monolith                   | Simple and maintainable                            |
+| AI                    | Gemini 3.5 Flash-Lite               | Fast, cost-efficient AI generation and ranking    |
+| `GeminiClient` location | `core`, shared by `brands` and `domains` | `core` already owns shared infrastructure; avoids `domains` reaching into `brands` |
+| Domain API            | name.com                           | Core hackathon integration                        |
+| Sandbox registration   | Separate `NameComClient` from `NAMECOM_TEST_*` settings | Guarantees a "demo" action can never hit production |
+| Database              | PostgreSQL                         | Reliable relational persistence                    |
+| Background Jobs       | Celery                              | Handles slow external operations                   |
+| Cache/Broker          | Redis                               | Caching + Celery messaging                          |
+| Deployment            | Oracle Cloud Compute                | Cloud-hosted deployment                             |
+| Containers            | Docker                              | Reproducible deployment                             |
+| Web Server            | Gunicorn + Nginx                    | Production-style serving                            |
+| Authentication        | JWT                                 | Appropriate for separate React frontend            |
+| Microservices         | Not used                            | Unnecessary complexity for MVP                      |
 
 ---
 
@@ -993,7 +1091,8 @@ The final architecture is intentionally simple while maintaining a clear API bou
              ↓                             ↓
       ┌───────────────┐             ┌───────────────┐
       │ Gemini 3.5    │             │ name.com      │
-      │ Flash-Lite    │             │ API           │
+      │ Flash-Lite    │             │ API (prod +   │
+      │ (via core)    │             │ sandbox)      │
       └───────────────┘             └───────┬───────┘
                                             │
                                             ↓
@@ -1025,4 +1124,4 @@ The architectural goal is:
 
 The core technical story is:
 
-**React + Tailwind → Django REST API → Application Services → PostgreSQL / Redis / Celery → Gemini + name.com → Oracle Cloud Compute.**
+**React + Tailwind → Django REST API → Application Services → PostgreSQL / Redis / Celery → Gemini + name.com (production and sandbox) → Oracle Cloud Compute.**

@@ -1,3 +1,22 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+  }
+}
+
+@layer components {
+  .perforation {
+    height: 1px;
+    background-image: repeating-linear-gradient(
+      to right,
+      theme('colors.hairline') 0 8px,
+      transparent 8px 16px
+    );
+  }
+}

@@ -40,6 +40,19 @@ class BrandGenerationService:
         Generate brand ideas for a project and persist them atomically.
         """
 
+        # Regenerate semantics: a prior unselected batch was explicitly
+        # rejected by the founder ("Not loving these? Regenerate"), so it
+        # is deleted before the new batch is created. This also fixes a
+        # correctness bug, not just cleanup: unique_brand_name_per_project_ci
+        # is project-wide, not per-batch, so leaving the old batch in
+        # place made regeneration fail outright whenever Gemini reused a
+        # name from the discarded batch. Once a brand is selected,
+        # BrandGenerateView is expected to be unreachable for this
+        # project (frontend hides the button), so this delete should
+        # never touch a selected brand in practice — but is_selected=False
+        # is kept as an explicit safety filter regardless.
+        BrandIdea.objects.filter(project=project, is_selected=False).delete()
+
         result = self.gemini_client.generate_brand_ideas(
             business_description=project.business_description,
             count=count,

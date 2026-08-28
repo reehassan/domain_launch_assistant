@@ -3,6 +3,10 @@ from django.db import IntegrityError
 from celery import shared_task
 from rest_framework.renderers import JSONRenderer
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from domain_launch_assistant.core.integrations.gemini.client import GeminiClientError
 from domain_launch_assistant.brands.serializers import BrandIdeaSerializer
 from domain_launch_assistant.brands.services.brand_generation import (
@@ -43,6 +47,16 @@ def generate_brand_ideas_task(task_id: str, project_id: str, count: int) -> None
         task.error_code = "AI_GENERATION_FAILED"
         task.error_message = "Brand generation produced conflicting results. Please try again."
         task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except Exception:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = "Something went wrong. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        logger.exception(
+            "Unhandled error in generate_brand_ideas_task",
+            extra={"task_id": task_id, "project_id": project_id},
+        )
         return
 
     task.status = TaskRecord.Status.SUCCESS

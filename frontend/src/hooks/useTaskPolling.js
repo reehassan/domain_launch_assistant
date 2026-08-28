@@ -5,7 +5,7 @@ import { getTaskStatus } from "../api/tasks";
 import { parseApiError } from "../api/client";
 
 const POLL_INTERVAL_MS = 2000;
-const POLL_TIMEOUT_MS = 30000;
+const POLL_TIMEOUT_MS = 150000;
 
 // IDLE    -> nothing started yet
 // LOADING -> task dispatched, polling in progress

@@ -16,8 +16,19 @@ import client from "./client";
 //
 // DNS_CONFIGURATION is a valid backend CheckType but withheld from the
 // frontend this iteration — enforced here, not by the backend.
+//
+// DNS_RESOLUTION withheld as of Day 3 (Feature 5/6 hardening): it does a
+// real socket.gethostbyname() lookup, which can only ever PASS for a
+// domain that's actually registered and pointed somewhere. Since domain
+// registration in this app is sandbox-simulated (Feature 5) and happens
+// AFTER a project reaches READY, DNS_RESOLUTION could never pass before
+// READY — making READY structurally unreachable. DOMAIN_READINESS (is
+// this the project's selected, available domain) is the check that's
+// actually meaningful pre-registration. The backend check_type and
+// handler are untouched — this is a frontend-only decision about which
+// checks this flow requests.
 
-export const AVAILABLE_CHECK_TYPES = ["DNS_RESOLUTION", "DOMAIN_READINESS"];
+export const AVAILABLE_CHECK_TYPES = ["DOMAIN_READINESS"];
 
 export async function runChecks(domainId, checkTypes = AVAILABLE_CHECK_TYPES) {
   const { data } = await client.post(`domains/${domainId}/check/`, {

@@ -18,39 +18,53 @@ export default function Dashboard() {
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">
-          Welcome{user?.first_name ? `, ${user.first_name}` : ""}
-        </h1>
-        <button onClick={logout} className="text-sm text-gray-500 underline">
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-widest text-ink/40">
+            Domain Launch Assistant
+          </p>
+          <h1 className="font-display text-2xl font-bold">
+            Welcome{user?.first_name ? `, ${user.first_name}` : ""}
+          </h1>
+        </div>
+        <button
+          onClick={logout}
+          className="font-mono text-xs uppercase tracking-wider text-ink/40 underline decoration-dotted hover:text-ink"
+        >
           Log out
         </button>
       </div>
 
       <Link
         to="/projects/new"
-        className="mb-4 inline-block rounded bg-black px-4 py-2 text-white"
+        className="mb-6 inline-block rounded-sm bg-signal px-5 py-2.5 font-display text-sm font-bold uppercase tracking-wide text-white transition hover:bg-signal/90"
       >
-        + Create Project
+        + New Manifest
       </Link>
 
       <ErrorBanner error={error} />
 
-      {projects === null && !error && <p className="text-gray-500">Loading projects…</p>}
-
-      {projects?.length === 0 && (
-        <p className="text-gray-500">No projects yet — create your first one.</p>
+      {projects === null && !error && (
+        <p className="font-mono text-sm text-ink/40">Loading manifests…</p>
       )}
 
-      <ul className="mt-4 space-y-2">
+      {projects?.length === 0 && (
+        <p className="font-mono text-sm text-ink/40">
+          No manifests filed yet — create your first one.
+        </p>
+      )}
+
+      <ul className="space-y-3">
         {projects?.map((p) => (
           <li key={p.id}>
             <Link
               to={`/projects/${p.id}`}
-              className="block rounded border p-3 hover:bg-gray-50"
+              className="flex items-center justify-between rounded-sm border-2 border-hairline bg-white p-4 transition hover:border-ink"
             >
-              <div className="font-medium">{p.name}</div>
-              <div className="text-sm text-gray-500">{p.status}</div>
+              <div className="font-display font-bold">{p.name}</div>
+              <span className="rounded-sm border border-hairline px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-ink/50">
+                {p.status}
+              </span>
             </Link>
           </li>
         ))}

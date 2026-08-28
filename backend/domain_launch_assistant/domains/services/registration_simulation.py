@@ -44,13 +44,21 @@ class DomainRegistrationSimulationService:
     settings — never the production client instance used by
     AvailabilityService / DomainClaimsService (architecture.md sections
     10, 19).
-
     Hard guard: refuses to build a client at all if NAMECOM_TEST_BASE_URL
     does not resolve to the sandbox host. This is the actual safety
     mechanism — a shared client instance is exactly how a "sandbox" call
     would end up hitting production — so the check runs before any HTTP
     call, and before the client object even exists.
-
+    Price handling: purchase_price is re-fetched from the sandbox
+    client's own checkAvailability call immediately before registering
+    — NOT read off the stored DomainResult. Sandbox and production
+    name.com environments return different (test) prices for the same
+    domain, so a price captured during the founder's real domain search
+    (production) will be rejected by the sandbox's Create Domain
+    endpoint with 400 "Purchase price does not match" if submitted
+    as-is. This costs one extra provider round-trip per call but is the
+    only price guaranteed to be valid for the environment actually being
+    hit.
     Persists nothing itself: the outcome is written by the caller (the
     Celery task) through TaskRecord only. No new model, no
     LaunchProject.status transition (data-model.md section 9).
@@ -108,29 +116,54 @@ class DomainRegistrationSimulationService:
             "phone": settings.NAMECOM_TEST_CONTACT_PHONE,
         }
 
+
     def simulate_registration(self, domain_result: DomainResult) -> dict:
         """
         Calls name.com's real Create Domain endpoint against the sandbox
-        base URL only, using purchase_price/purchase_type already stored
-        on domain_result (from the original checkAvailability call — no
-        extra provider round-trip to re-price).
-
+        base URL only. Price is re-fetched from THIS SAME sandbox client
+        immediately before registering — sandbox and production return
+        different (test) prices for the same domain, so the price
+        originally stored on domain_result (from the production
+        checkAvailability call that ran during the founder's actual
+        domain search) can never be trusted here. Submitting a
+        mismatched price is rejected by name.com with 400 "Purchase
+        price does not match".
         Raises typed errors on any failure; callers (the Celery task)
         must not persist anything on failure — same discipline as
         DomainClaimsService.
         """
         try:
+            availability = self.namecom_client.check_availability([domain_result.domain])
+        except NameComTimeoutError as exc:
+            raise DomainRegistrationSimulationTimeoutError(str(exc)) from exc
+        except NameComAPIError as exc:
+            raise DomainRegistrationSimulationProviderError(str(exc)) from exc
+
+        # ASSUMPTION — not verified against every possible sandbox
+        # response shape: check_availability is expected to return a
+        # list with exactly one entry for a single-domain query (as
+        # confirmed manually for kiply.dev). If the sandbox ever omits
+        # the domain or returns it as unpurchasable, that's a real
+        # failure state, not something to paper over with a fallback
+        # price.
+        if not availability or not availability[0].get("purchasable"):
+            raise DomainRegistrationSimulationProviderError(
+                f"Sandbox reports '{domain_result.domain}' is not purchasable."
+            )
+        sandbox_price = availability[0]["purchasePrice"]
+        sandbox_purchase_type = availability[0].get("purchaseType") or "registration"
+
+        try:
             raw = self.namecom_client.register_domain(
                 domain_name=domain_result.domain,
-                purchase_price=domain_result.purchase_price,
-                purchase_type=domain_result.purchase_type or "registration",
+                purchase_price=sandbox_price,
+                purchase_type=sandbox_purchase_type,
                 contact=self._demo_contact(),
             )
         except NameComTimeoutError as exc:
             raise DomainRegistrationSimulationTimeoutError(str(exc)) from exc
         except NameComAPIError as exc:
             raise DomainRegistrationSimulationProviderError(str(exc)) from exc
-
         # ASSUMPTION — not verified against a real sandbox payload: Create
         # Domain's exact response shape wasn't available in name.com's
         # public docs when this was written. `orderId` is name.com's
@@ -140,7 +173,6 @@ class DomainRegistrationSimulationService:
         # a missing display field must never fail an otherwise-successful
         # sandbox registration.
         order_id = raw.get("orderId") or f"sandbox-{domain_result.domain}"
-
         return {
             "simulated": True,
             "order_id": order_id,

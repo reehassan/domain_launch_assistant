@@ -94,6 +94,10 @@ class DomainSearchService:
                     provider=result["provider"],
                     checked_at=result["checked_at"],
                     raw_metadata=result["raw_metadata"],
+                    purchase_price=result["purchase_price"],
+                    renewal_price=result["renewal_price"],
+                    premium=result["premium"],
+                    purchase_type=result["purchase_type"],
                 )
                 for result in normalized_results
             ]

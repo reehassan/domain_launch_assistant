@@ -8,6 +8,19 @@
 //   - claimedDomainIds tracks which rows came back with has_claims:true
 //     (reported via DomainClaimsCheck's onChecked callback) and disables
 //     that row's "Select" button, with a note pointing back at the list.
+//   - Day 3 (Feature 6): added a 04 Checkout section — DomainCheckoutPanel
+//     — shown once project.status === "READY" and a domain is selected.
+//     On-platform cart/checkout backed by the existing sandbox-only
+//     simulate-registration endpoint (no real payment, no real name.com
+//     purchase). Placed after Readiness, before the final seal.
+//   - FIX (Day 3, readiness/checkout desync): running DNS/domain checks
+//     can flip LaunchProject.status to READY server-side (in
+//     run_domain_checks_task), but the check endpoint's response is just
+//     {results: [DomainCheck]} — it never carries the updated project
+//     status back. Without a refetch, local `project.status` goes stale
+//     the moment checks pass, so the Checkout gate (project.status ===
+//     "READY") never opens even though the backend is already READY.
+//     Refetching the project on dnsCheckTask SUCCESS closes that gap.
 // Everything else (brand flow, readiness flow) is unchanged from Day 7.
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
@@ -23,7 +36,7 @@ import { latestChecksByType } from "../utils/checks";
 import { useTaskPolling } from "../hooks/useTaskPolling";
 import DomainClaimsCheck from "../components/DomainClaimsCheck";
 import DomainRecommendationPanel from "../components/DomainRecommendationPanel";
-
+import DomainCheckoutPanel from "../components/DomainCheckoutPanel";
 export default function ProjectDetails() {
   const { id } = useParams();
   const [project, setProject] = useState(null);
@@ -35,11 +48,9 @@ export default function ProjectDetails() {
   const [selectingDomainId, setSelectingDomainId] = useState(null);
   const [searchVersion, setSearchVersion] = useState(0);
   const [claimedDomainIds, setClaimedDomainIds] = useState(() => new Set());
-
   const brandGenTask = useTaskPolling();
   const domainSearchTask = useTaskPolling();
   const dnsCheckTask = useTaskPolling();
-
   useEffect(() => {
     let mounted = true;
     getProject(id)
@@ -70,7 +81,6 @@ export default function ProjectDetails() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-
   async function handleGenerate() {
     setError(null);
     await brandGenTask.run(() => generateBrands(id));
@@ -83,7 +93,6 @@ export default function ProjectDetails() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandGenTask.state, brandGenTask.result, brandGenTask.error]);
-
   async function handleSelect(brandId) {
     setError(null);
     setSelectingId(brandId);
@@ -97,7 +106,6 @@ export default function ProjectDetails() {
       setSelectingId(null);
     }
   }
-
   async function handleFindDomains() {
     setError(null);
     await domainSearchTask.run(() => startDomainSearch(id, project.selected_brand.id));
@@ -112,7 +120,6 @@ export default function ProjectDetails() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [domainSearchTask.state, domainSearchTask.result, domainSearchTask.error]);
-
   async function handleSelectDomain(domainId) {
     setError(null);
     setSelectingDomainId(domainId);
@@ -126,7 +133,6 @@ export default function ProjectDetails() {
       setSelectingDomainId(null);
     }
   }
-
   function handleClaimsChecked(domainId, hasClaims) {
     setClaimedDomainIds((prev) => {
       const next = new Set(prev);
@@ -138,7 +144,6 @@ export default function ProjectDetails() {
       return next;
     });
   }
-
   async function handleRunChecks() {
     setError(null);
     await dnsCheckTask.run(() => runChecks(project.selected_domain.id));
@@ -146,17 +151,22 @@ export default function ProjectDetails() {
   useEffect(() => {
     if (dnsCheckTask.state === "SUCCESS") {
       setChecks(dnsCheckTask.result.results);
+      // FIX: the check task's response never carries project.status —
+      // it's mutated server-side inside run_domain_checks_task, not
+      // returned here. Refetch so a READY transition (all requested
+      // checks PASSed) actually reaches local state and opens Checkout.
+      getProject(id)
+        .then(setProject)
+        .catch((err) => setError(parseApiError(err)));
     } else if (dnsCheckTask.state === "ERROR") {
       setError(dnsCheckTask.error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dnsCheckTask.state, dnsCheckTask.result, dnsCheckTask.error]);
-
   const showGenerateButton =
     project?.status === "DRAFT" && brands !== null && brands.length === 0;
   const showFindDomainsButton =
     project?.selected_brand && domains !== null && domains.length === 0;
-
   // ---- Section stamps (Day 7) --------------------------------------
   const brandStamp = project?.selected_brand
     ? { status: "done", label: "Stamped" }
@@ -165,7 +175,6 @@ export default function ProjectDetails() {
     : brandGenTask.state === "ERROR"
     ? { status: "error", label: "Rejected" }
     : { status: "pending", label: "Pending" };
-
   const domainStamp = project?.selected_domain
     ? { status: "done", label: "Stamped" }
     : domainSearchTask.state === "LOADING"
@@ -173,7 +182,6 @@ export default function ProjectDetails() {
     : domainSearchTask.state === "ERROR"
     ? { status: "error", label: "Rejected" }
     : { status: "pending", label: "Pending" };
-
   const latestChecks = checks ? latestChecksByType(checks) : [];
   const readinessComplete =
     checks &&
@@ -188,10 +196,8 @@ export default function ProjectDetails() {
     : readinessFailed
     ? { status: "error", label: "Rejected" }
     : { status: "pending", label: "Pending" };
-
   const allReady =
     brandStamp.status === "done" && domainStamp.status === "done" && readinessStamp.status === "done";
-
   return (
     <div className="mx-auto my-12 max-w-xl p-4">
       <Link
@@ -200,11 +206,8 @@ export default function ProjectDetails() {
       >
         ← Back to Dashboard
       </Link>
-
       <ErrorBanner error={error} />
-
       {!project && !error && <p className="mt-6 font-mono text-sm text-ink/40">Loading manifest…</p>}
-
       {project && (
         <div className="mt-4 overflow-hidden rounded-sm border-2 border-hairline bg-white shadow-sm">
           <div className="flex items-center justify-between border-b-2 border-hairline px-6 py-4">
@@ -218,12 +221,10 @@ export default function ProjectDetails() {
               {project.status}
             </span>
           </div>
-
           <div className="px-6 py-5">
             <p className="font-mono text-[10px] uppercase tracking-widest text-ink/40">Your business</p>
             <p className="mt-1 text-sm text-ink/80">{project.business_description}</p>
           </div>
-
           {/* 01 — BRAND */}
           <div className="px-6 pb-5">
             <div className="flex items-center justify-between">
@@ -232,11 +233,9 @@ export default function ProjectDetails() {
               </p>
               <StampBadge status={brandStamp.status} label={brandStamp.label} />
             </div>
-
             {project.selected_brand && (
               <p className="mt-2 font-mono text-xl font-medium">{project.selected_brand.name}</p>
             )}
-
             {showGenerateButton && (
               <button
                 onClick={handleGenerate}
@@ -246,7 +245,6 @@ export default function ProjectDetails() {
                 {brandGenTask.state === "LOADING" ? "Generating…" : "Generate Brand Ideas"}
               </button>
             )}
-
             {brands && brands.length > 0 && !project.selected_brand && (
               <>
                 <ul className="mt-3 space-y-2">
@@ -279,9 +277,7 @@ export default function ProjectDetails() {
               </>
             )}
           </div>
-
           <PerforatedDivider />
-
           {/* 02 — DOMAIN */}
           <div className="px-6 py-5">
             <div className="flex items-center justify-between">
@@ -290,7 +286,6 @@ export default function ProjectDetails() {
               </p>
               <StampBadge status={domainStamp.status} label={domainStamp.label} />
             </div>
-
             {project.selected_domain && (
               <div className="mt-2">
                 <p className="font-mono text-2xl font-medium tracking-tight">
@@ -307,7 +302,6 @@ export default function ProjectDetails() {
                 </div>
               </div>
             )}
-
             {showFindDomainsButton && (
               <button
                 onClick={handleFindDomains}
@@ -317,7 +311,6 @@ export default function ProjectDetails() {
                 {domainSearchTask.state === "LOADING" ? "Searching…" : "Find Domains"}
               </button>
             )}
-
             {domains && domains.length > 0 && !project.selected_domain && (
               <>
                 <ul className="mt-3 space-y-2">
@@ -351,7 +344,6 @@ export default function ProjectDetails() {
                             )}
                           </div>
                         </div>
-
                         {d.status === "AVAILABLE" && (
                           <DomainClaimsCheck domainId={d.id} onChecked={handleClaimsChecked} />
                         )}
@@ -366,14 +358,11 @@ export default function ProjectDetails() {
                 >
                   {domainSearchTask.state === "LOADING" ? "Regenerating…" : "Not loving these? Regenerate"}
                 </button>
-
                 <DomainRecommendationPanel projectId={id} triggerKey={searchVersion} />
               </>
             )}
           </div>
-
           <PerforatedDivider />
-
           {/* 03 — READINESS */}
           {project.selected_domain && (
             <div className="px-6 py-5">
@@ -383,7 +372,6 @@ export default function ProjectDetails() {
                 </p>
                 <StampBadge status={readinessStamp.status} label={readinessStamp.label} />
               </div>
-
               <button
                 onClick={handleRunChecks}
                 disabled={dnsCheckTask.state === "LOADING"}
@@ -391,7 +379,6 @@ export default function ProjectDetails() {
               >
                 {dnsCheckTask.state === "LOADING" ? "Running…" : "Run Checks"}
               </button>
-
               {checks && checks.length > 0 && (
                 <ul className="mt-3 space-y-2">
                   {latestChecks.map((c) => {
@@ -417,9 +404,14 @@ export default function ProjectDetails() {
               )}
             </div>
           )}
-
+          {/* 04 — CHECKOUT (Day 3, Feature 6) */}
+          {project.status === "READY" && project.selected_domain && (
+            <>
+              <PerforatedDivider />
+              <DomainCheckoutPanel domain={project.selected_domain} />
+            </>
+          )}
           <PerforatedDivider />
-
           {/* FINAL SEAL */}
           <div className="px-6 pb-6 pt-2 text-center">
             <StampBadge

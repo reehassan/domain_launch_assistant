@@ -41,7 +41,6 @@ class AvailabilityService:
         normalized = []
         for domain_name, ext in zip(domain_names, extensions):
             raw = by_domain.get(domain_name)
-
             if raw is None:
                 # name.com's response omitted this specific domain even
                 # though the request as a whole succeeded — a per-domain
@@ -54,10 +53,29 @@ class AvailabilityService:
                     "provider": self.PROVIDER,
                     "checked_at": checked_at,
                     "raw_metadata": None,
+                    "purchase_price": None,
+                    "renewal_price": None,
+                    "premium": None,
+                    "purchase_type": None,
                 })
                 continue
 
             is_available = bool(raw.get("purchasable", False))
+
+            # Live Domain Pricing (Day 7+, Feature 1): pulled from the
+            # same checkAvailability response already fetched above — no
+            # new provider call. Per name.com's docs, purchaseType is not
+            # guaranteed present on every result; when absent we default
+            # to "registration" for available results (their own stated
+            # recommendation), and leave it null for unavailable ones.
+            # ASSUMPTION — not verified against a real sandbox payload.
+            purchase_price = raw.get("purchasePrice")
+            renewal_price = raw.get("renewalPrice")
+            premium = raw.get("premium")
+            purchase_type = raw.get("purchaseType") or (
+                "registration" if is_available else None
+            )
+
             normalized.append({
                 "domain": domain_name,
                 "extension": ext,
@@ -70,8 +88,11 @@ class AvailabilityService:
                 "provider": self.PROVIDER,
                 "checked_at": checked_at,
                 "raw_metadata": raw,
+                "purchase_price": purchase_price,
+                "renewal_price": renewal_price,
+                "premium": premium,
+                "purchase_type": purchase_type,
             })
-
         return normalized
 
     @staticmethod

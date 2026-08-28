@@ -94,7 +94,7 @@ poll_task() {
   local task_id="$1"
   local elapsed=0
   local interval=2
-  local timeout=30
+  local timeout=300
 
   while [ "$elapsed" -lt "$timeout" ]; do
     local resp
@@ -502,10 +502,8 @@ curl -s -X GET "$BASE_URL/domains/$DOMAIN_ID/claims/" \
 
 echo
 echo
-echo "== 13. Get launch report =="
-LAUNCH_REPORT_RESPONSE=$(curl -s -X GET "$BASE_URL/projects/$PROJECT_ID/launch-report/" \
-  -H "Authorization: Bearer $TOKEN")
-echo "$LAUNCH_REPORT_RESPONSE"
+echo "== 13. Get launch report (KNOWN NOT IMPLEMENTED — expect 404, see docs/02_architecture/api-contract.md) =="
+get_with_status "$BASE_URL/projects/$PROJECT_ID/launch-report/" "$TOKEN"
 
 echo
 echo
@@ -550,6 +548,10 @@ else
   echo
   echo "== 14f. Second user POSTs check-claims on first user's domain — expect HTTP 404 =="
   post_with_status "$BASE_URL/domains/$DOMAIN_ID/check-claims/" "$OTHER_TOKEN"
+
+  echo
+  echo "== 14f2. Second user GETs first user's recommend-domain task — expect HTTP 404 =="
+  get_with_status "$BASE_URL/tasks/$RECOMMEND_TASK_ID/" "$OTHER_TOKEN"
 
   echo
   echo "== 14g. Sanity check: FIRST user still gets HTTP 200 on the same claims GET =="
