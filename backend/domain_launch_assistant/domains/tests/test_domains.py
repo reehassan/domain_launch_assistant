@@ -524,6 +524,87 @@ class TestSelectDomain:
         assert response.status_code == status.HTTP_409_CONFLICT
         assert response.data["error"]["code"] == "CONFLICT"
 
+    def test_select_domain_with_active_claim_fails(
+        self, auth_client_a, project_a, brand_idea_a
+    ):
+        """
+        Ticket 6 — server-side backstop. A domain whose latest
+        DomainClaim has has_claims=True must be unselectable even via
+        a direct API call that bypasses the frontend's auto-check gate
+        entirely (DomainClaimsCheck now runs automatically on mount,
+        and DomainStep withholds "Select" until it resolves CLEAR —
+        this test exercises the case where that frontend gate never
+        ran at all).
+        """
+        search = _create_search(project_a, brand_idea_a)
+        result = _create_domain_result(project_a, search, domain="ledgerflow.ai", available=True)
+        _create_domain_claim(
+            result,
+            has_claims=True,
+            claims_data={"claimId": "8c3027d30000000000382500785", "claims": []},
+        )
+
+        response = auth_client_a.post(
+            f"/api/v1/projects/{project_a.id}/select-domain/",
+            {"domain_id": str(result.id)},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert response.data["error"]["code"] == "CONFLICT"
+        project_a.refresh_from_db()
+        assert project_a.selected_domain_id is None
+        assert project_a.status != LaunchProject.Status.DOMAIN_SELECTED
+
+    def test_select_domain_with_cleared_claim_succeeds(
+        self, auth_client_a, project_a, brand_idea_a
+    ):
+        """
+        Companion to the above: a domain that WAS checked and came back
+        clear (has_claims=False) must still be selectable — the Rule #6
+        guard should only block on an actual positive claim, not on
+        "a check happened at all".
+        """
+        search = _create_search(project_a, brand_idea_a)
+        result = _create_domain_result(project_a, search, domain="ledgerflow.ai", available=True)
+        _create_domain_claim(result, has_claims=False)
+
+        response = auth_client_a.post(
+            f"/api/v1/projects/{project_a.id}/select-domain/",
+            {"domain_id": str(result.id)},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        project_a.refresh_from_db()
+        assert project_a.selected_domain_id == result.id
+
+    def test_select_domain_with_older_cleared_and_newer_claimed_fails(
+        self, auth_client_a, project_a, brand_idea_a
+    ):
+        """
+        Regression: the guard must read the LATEST claim, not just any
+        claim. An old clear result followed by a newer positive result
+        must still block selection — DomainClaim is append-only, so an
+        older row lingering in has_claims=False must never mask a more
+        recent has_claims=True one.
+        """
+        search = _create_search(project_a, brand_idea_a)
+        result = _create_domain_result(project_a, search, domain="ledgerflow.ai", available=True)
+        _create_domain_claim(
+            result, has_claims=False, checked_at=timezone.now() - timedelta(minutes=10)
+        )
+        _create_domain_claim(result, has_claims=True)
+
+        response = auth_client_a.post(
+            f"/api/v1/projects/{project_a.id}/select-domain/",
+            {"domain_id": str(result.id)},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert response.data["error"]["code"] == "CONFLICT"
+
     def test_select_domain_belonging_to_other_project_fails(
         self, auth_client_a, project_a, project_b, brand_idea_b
     ):
