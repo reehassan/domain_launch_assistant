@@ -69,6 +69,13 @@ class CheckDomainView(APIView):
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
+        if TaskRecord.has_active_task(project):
+            return api_error(
+                code="CONFLICT",
+                message="A task is already in progress for this project. Please wait for it to finish.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+
         checks = CheckDomainService().create_pending_checks(
             project=project,
             domain_result=domain_result,
