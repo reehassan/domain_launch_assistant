@@ -353,6 +353,8 @@ Required.
 
 # 9. Launch Projects
 
+> `LaunchProjectViewSet` only implements Create, List, and Retrieve (`CreateModelMixin` / `ListModelMixin` / `RetrieveModelMixin`) — Update and Delete are deliberately not wired up yet, so there is no `PUT`/`PATCH`/`DELETE /api/v1/projects/{id}/`. All project mutation happens through the more specific action endpoints below (`select-brand/`, `select-domain/`, etc.), not through a general-purpose project update.
+
 ## 9.1 Create Project
 
 ```http
@@ -833,6 +835,8 @@ Optional:
 
 `purchase_price`, `renewal_price`, `premium`, and `purchase_type` are populated directly from the existing `checkAvailability` call to name.com — no additional provider call is made. All four are nullable; `CHECK_FAILED` and `TAKEN` results will not have pricing.
 
+Results are scoped to the project's latest `COMPLETED` `DomainSearch` only — regenerating a search does not resurrect older results in this list (they remain reachable by ID, just not here).
+
 ### Errors
 
 ```text
@@ -845,13 +849,15 @@ Optional:
 
 ---
 
-# 18. Recommend Domain
+# 18. Domain Recommendation
+
+Uses Gemini to pick the best of the project's currently `AVAILABLE` domain results and explain the choice.
+
+## 18.1 Generate Recommendation
 
 ```http
 POST /api/v1/projects/{id}/recommend-domain/
 ```
-
-Uses Gemini to pick the best of the project's currently `AVAILABLE` domain results and explain the choice.
 
 ### Authentication
 
@@ -860,6 +866,8 @@ Required.
 ### Request
 
 No body. Uses the project's current `AVAILABLE` domain results.
+
+> **Regenerate:** calling this endpoint again creates a new `DomainRecommendation` row rather than overwriting the previous one — there is no separate regenerate endpoint, same convention as `generate-brands/` and `domain-search/`.
 
 ### Response
 
@@ -881,12 +889,27 @@ Task result on `SUCCESS` (fetched via `GET /api/v1/tasks/{task_id}/`):
 
 ```json
 {
-  "recommended_domain_id": "uuid",
-  "reasoning": "ledgerflow.ai is short, matches the brand exactly, and the .ai extension signals the product category."
+  "id": "uuid",
+  "project_id": "uuid",
+  "recommended_domain": {
+    "id": "uuid",
+    "domain": "ledgerflow.ai",
+    "extension": ".ai",
+    "available": true,
+    "status": "AVAILABLE",
+    "provider": "name.com",
+    "checked_at": "2026-08-22T14:10:04Z",
+    "purchase_price": 69.99,
+    "renewal_price": 69.99,
+    "premium": false,
+    "purchase_type": "registration"
+  },
+  "reasoning": "ledgerflow.ai is short, matches the brand exactly, and the .ai extension signals the product category.",
+  "created_at": "2026-08-22T14:22:00Z"
 }
 ```
 
-The result is persisted as a `DomainRecommendation` so it survives a page refresh. Regenerating (calling this endpoint again) creates a new `DomainRecommendation` row rather than overwriting the previous one; the frontend reads the latest by `created_at`, the same convention used for `BrandIdea` and `DomainSearch`.
+The result is persisted as a `DomainRecommendation` so it survives a page refresh.
 
 ### Errors
 
@@ -900,6 +923,60 @@ The result is persisted as a `DomainRecommendation` so it survives a page refres
 404 NOT_FOUND
 
 409 CONFLICT                — no domain search has completed
+```
+
+## 18.2 Get Recommendation History
+
+```http
+GET /api/v1/projects/{id}/domain-recommendations/
+```
+
+Returns every `DomainRecommendation` ever generated for the project, newest first (same `created_at` convention as brands and domain searches). The frontend reads the first entry for the "We'd pick X because Y" panel.
+
+### Authentication
+
+Required.
+
+### Response
+
+```http
+200 OK
+```
+
+```json
+{
+  "results": [
+    {
+      "id": "uuid",
+      "project_id": "uuid",
+      "recommended_domain": {
+        "id": "uuid",
+        "domain": "ledgerflow.ai",
+        "extension": ".ai",
+        "available": true,
+        "status": "AVAILABLE",
+        "provider": "name.com",
+        "checked_at": "2026-08-22T14:10:04Z",
+        "purchase_price": 69.99,
+        "renewal_price": 69.99,
+        "premium": false,
+        "purchase_type": "registration"
+      },
+      "reasoning": "ledgerflow.ai is short, matches the brand exactly, and the .ai extension signals the product category.",
+      "created_at": "2026-08-22T14:22:00Z"
+    }
+  ]
+}
+```
+
+### Errors
+
+```text
+401 AUTHENTICATION_REQUIRED
+
+403 PERMISSION_DENIED
+
+404 NOT_FOUND
 ```
 
 ---
@@ -940,8 +1017,12 @@ Task result on `SUCCESS`:
 
 ```json
 {
+  "id": "uuid",
+  "domain_result_id": "uuid",
   "has_claims": false,
-  "claims": []
+  "claims_data": null,
+  "checked_at": "2026-08-22T14:20:00Z",
+  "created_at": "2026-08-22T14:20:00Z"
 }
 ```
 
@@ -971,7 +1052,7 @@ Each check creates a new `DomainClaim` row (append-only history, same pattern as
 GET /api/v1/domains/{id}/claims/
 ```
 
-Returns the most recent `DomainClaim` for the domain — same read pattern as `GET /api/v1/domains/{id}/checks/`.
+Returns every claims check ever run for the domain, newest first — same read pattern as `GET /api/v1/domains/{id}/checks/`. The frontend reads the first entry for the "has claims" panel.
 
 ### Authentication
 
@@ -985,10 +1066,16 @@ Required.
 
 ```json
 {
-  "id": "uuid",
-  "has_claims": false,
-  "claims_data": null,
-  "checked_at": "2026-08-22T14:20:00Z"
+  "results": [
+    {
+      "id": "uuid",
+      "domain_result_id": "uuid",
+      "has_claims": false,
+      "claims_data": null,
+      "checked_at": "2026-08-22T14:20:00Z",
+      "created_at": "2026-08-22T14:20:00Z"
+    }
+  ]
 }
 ```
 
@@ -1046,6 +1133,7 @@ The selected domain must:
 * Belong to the project.
 * Have `status=AVAILABLE`.
 * Not be stale beyond the configured freshness threshold.
+* Have no active trademark claim on record (a claim with `has_claims=true` on its most recent `DomainClaim` row blocks selection).
 
 ### Errors
 
@@ -1063,15 +1151,23 @@ The selected domain must:
 
 ---
 
-> **Note on the endpoints below:** `configure-dns/`, `check/`, `checks/`, and `simulate-registration/` are implemented by Django apps other than `domains` (`dns` and, for simulate-registration, `domains`'s registration-simulation service), even though they share the `/api/v1/domains/{id}/...` URL prefix used by the `domains` app's endpoints above. The shared prefix is a deliberate URL-design choice — from the client's perspective, a domain's DNS state and registration actions are part of that domain resource — and does not imply the underlying app boundaries are merged.
+> **Note on the endpoints below:** `create-dns-record/`, `dns-records/`, `check/`, `checks/`, and `simulate-registration/` are implemented by Django apps other than `domains` (`dns`, and, for simulate-registration/toggle-privacy, `domains`'s registration-simulation service), even though they share the `/api/v1/domains/{id}/...` URL prefix used by the `domains` app's endpoints above. The shared prefix is a deliberate URL-design choice — from the client's perspective, a domain's DNS state and registration actions are part of that domain resource — and does not imply the underlying app boundaries are merged.
 
 ---
 
-# 21. Configure DNS
+# 21. DNS Record Management ("Point your domain")
+
+Real DNS record management against name.com's actual DNS Records API (Core API v1: `GET`/`POST /domains/{domainName}/records`) — this is a live proxy to name.com, not a local model. Unlike every other name.com-backed feature in this app, there is no `DomainCheck`/`DomainClaim`-style row to read from the database instead: name.com is the only source of truth for DNS records.
+
+Available once the project has reached launch readiness (`LaunchProject.status == READY`) — the same gate used by Simulate Registration below, since a domain that was never sandbox-registered has nothing there to manage.
+
+## 21.1 Create DNS Record
 
 ```http
-POST /api/v1/domains/{id}/configure-dns/
+POST /api/v1/domains/{id}/create-dns-record/
 ```
+
+`{id}` is `DomainResult.id`.
 
 ### Authentication
 
@@ -1081,26 +1177,22 @@ Required.
 
 ```json
 {
-  "records": [
-    {
-      "record_type": "A",
-      "record_name": "@",
-      "value": "203.0.113.10"
-    },
-    {
-      "record_type": "CNAME",
-      "record_name": "www",
-      "value": "ledgerflow.ai"
-    }
-  ]
+  "host": "www",
+  "type": "CNAME",
+  "answer": "ledgerflow.ai",
+  "ttl": 300
 }
 ```
 
-`records` is required — at least one DNS record must be requested.
+* `host` — optional, defaults to `""` (an empty or `"@"` host is the apex/root record).
+* `type` — required. One of `A`, `AAAA`, `ANAME`, `CNAME`, `MX`, `NS`, `SRV`, `TXT`. The frontend's record-type dropdown is narrowed to `A`/`CNAME` only (`DomainDnsPanel.jsx`); the backend and name.com both support the full set.
+* `answer` — required.
+* `ttl` — optional, defaults to `300` seconds (name.com's minimum).
+* `priority` — required for `MX` and `SRV` records only; ignored for all others.
 
 ### Response
 
-Because DNS configuration is asynchronous:
+Asynchronous, for consistency with every other mutating name.com call in this app, even though a single Create Record call is typically fast:
 
 ```http
 202 Accepted
@@ -1109,29 +1201,25 @@ Because DNS configuration is asynchronous:
 ```json
 {
   "domain_id": "uuid",
-  "project_id": "uuid",
-  "status": "CONFIGURING_DNS",
+  "status": "PROCESSING",
   "task_id": "celery-task-id"
 }
 ```
 
-The project status becomes:
+Task result on `SUCCESS` — the created record, returned directly from name.com with no `{"results": [...]}` wrapper, since exactly one record is created per call:
 
-```text
-CONFIGURING_DNS
+```json
+{
+  "id": 12345,
+  "domainName": "ledgerflow.ai",
+  "host": "www",
+  "fqdn": "www.ledgerflow.ai.",
+  "type": "CNAME",
+  "answer": "ledgerflow.ai",
+  "ttl": 300,
+  "priority": null
+}
 ```
-
-The Celery worker writes the requested records through the name.com DNS API. This corresponds to `DNSConfigurationService` in architecture.md.
-
-After successful completion:
-
-```text
-CONFIGURING_DNS
-        ↓
-VERIFYING_DNS
-```
-
-Once DNS is configured, call `POST /api/v1/domains/{id}/check/` (below) to verify it — configuration and verification are separate steps.
 
 ### Errors
 
@@ -1144,7 +1232,60 @@ Once DNS is configured, call `POST /api/v1/domains/{id}/check/` (below) to verif
 
 404 NOT_FOUND
 
-409 CONFLICT
+409 CONFLICT                — project.status != READY
+
+502 EXTERNAL_API_TIMEOUT
+
+503 EXTERNAL_API_ERROR
+```
+
+## 21.2 List DNS Records
+
+```http
+GET /api/v1/domains/{id}/dns-records/
+```
+
+The one `GET` in this app that is **not** a local-database read: it calls name.com directly on every request and can fail with a provider error inline (unlike every other list endpoint in this contract, which only ever reads Postgres).
+
+### Authentication
+
+Required.
+
+### Response
+
+```http
+200 OK
+```
+
+```json
+{
+  "results": [
+    {
+      "id": 12345,
+      "domainName": "ledgerflow.ai",
+      "host": "www",
+      "fqdn": "www.ledgerflow.ai.",
+      "type": "CNAME",
+      "answer": "ledgerflow.ai",
+      "ttl": 300,
+      "priority": null
+    }
+  ]
+}
+```
+
+### Errors
+
+```text
+401 AUTHENTICATION_REQUIRED
+
+403 PERMISSION_DENIED
+
+404 NOT_FOUND
+
+409 CONFLICT                — project.status != READY
+
+500 INTERNAL_ERROR          — sandbox-guard tripped (should be unreachable)
 
 502 EXTERNAL_API_TIMEOUT
 
@@ -1159,7 +1300,7 @@ Once DNS is configured, call `POST /api/v1/domains/{id}/check/` (below) to verif
 POST /api/v1/domains/{id}/check/
 ```
 
-> Corresponds to `DNSVerificationService` in architecture.md. Run this **after** `configure-dns` above, to confirm the written records actually resolve and the domain is launch-ready.
+Corresponds to `DNSVerificationService` in architecture.md. Runs one or more launch-readiness checks against a domain. This is independent of the DNS Record Management feature in §21 above — this endpoint asks "is this domain ready for launch," not "does record X exist."
 
 ### Authentication
 
@@ -1170,12 +1311,12 @@ Required.
 ```json
 {
   "check_types": [
-    "DNS_CONFIGURATION",
-    "DNS_RESOLUTION",
     "DOMAIN_READINESS"
   ]
 }
 ```
+
+The backend's `check_types` enum has three values: `DNS_CONFIGURATION`, `DNS_RESOLUTION`, `DOMAIN_READINESS`. `DNS_CONFIGURATION` is currently rejected synchronously with `400 VALIDATION_ERROR` — it has no handler implemented yet (`CheckDomainService.UNSUPPORTED_CHECK_TYPES`). The frontend only ever requests `DOMAIN_READINESS`: `DNS_RESOLUTION` is technically supported by the backend but withheld frontend-side, because a real DNS lookup can only ever pass for a domain that's actually registered and pointed somewhere — and in this app, registration happens only after the project reaches `READY`, so requiring `DNS_RESOLUTION` to pass first would make `READY` unreachable.
 
 ### Response
 
@@ -1186,7 +1327,7 @@ Required.
 ```json
 {
   "domain_id": "uuid",
-  "status": "PENDING",
+  "status": "PROCESSING",
   "task_id": "celery-task-id"
 }
 ```
@@ -1248,24 +1389,13 @@ Required.
   "results": [
     {
       "id": "uuid",
-      "check_type": "DNS_CONFIGURATION",
+      "check_type": "DOMAIN_READINESS",
       "status": "PASS",
-      "record_type": "A",
-      "record_name": "@",
-      "expected_value": "203.0.113.10",
-      "actual_value": "203.0.113.10",
-      "message": "DNS configuration is correct.",
-      "checked_at": "2026-08-22T14:15:00Z"
-    },
-    {
-      "id": "uuid",
-      "check_type": "DNS_RESOLUTION",
-      "status": "PASS",
-      "record_type": "A",
-      "record_name": "@",
-      "expected_value": "203.0.113.10",
-      "actual_value": "203.0.113.10",
-      "message": "Domain resolves correctly.",
+      "record_type": null,
+      "record_name": null,
+      "expected_value": null,
+      "actual_value": null,
+      "message": "Domain is ready for launch.",
       "checked_at": "2026-08-22T14:15:01Z"
     }
   ]
@@ -1288,7 +1418,7 @@ Required.
 
 ### Request
 
-No body — the service pulls `purchase_price`/`purchase_type` off the stored `DomainResult`.
+No body — the service pulls `purchase_price`/`purchase_type` off a fresh sandbox `checkAvailability` call it makes itself, not off the stored `DomainResult` (sandbox and production name.com return different test prices for the same domain, so the production-sourced price on `DomainResult` would be rejected by the sandbox's Create Domain endpoint).
 
 ### Response
 
@@ -1310,6 +1440,7 @@ Task result on `SUCCESS`:
 {
   "simulated": true,
   "order_id": "sandbox-order-id",
+  "privacy_enabled": true,
   "message": "Registered in name.com sandbox — no real domain or charge."
 }
 ```
@@ -1338,7 +1469,75 @@ Task result on `SUCCESS`:
 
 ---
 
-# 25. Get Launch Report
+# 25. Toggle WHOIS Privacy (sandbox-only)
+
+```http
+POST /api/v1/domains/{id}/toggle-privacy/
+```
+
+Toggles WHOIS privacy for a domain already registered in the name.com sandbox via §24 Simulate Registration. Reuses that same sandbox-only client and the same `READY` gate — toggling privacy on a domain never sandbox-registered fails as a routine provider error (name.com returns 404 for it), not a special case handled here.
+
+> **Status:** this endpoint currently exists in `domains/urls.py` and is documented here to match reality (the point of this revision). Its future is under review separately (Ticket 12) — if that ticket removes the feature, this section should be deleted in the same change, not left behind as a dangling contract entry.
+
+### Authentication
+
+Required.
+
+### Request
+
+```json
+{
+  "enabled": true
+}
+```
+
+### Response
+
+```http
+202 Accepted
+```
+
+```json
+{
+  "domain_id": "uuid",
+  "status": "PROCESSING",
+  "task_id": "celery-task-id"
+}
+```
+
+Task result on `SUCCESS`:
+
+```json
+{
+  "domain": "ledgerflow.ai",
+  "privacy_enabled": true,
+  "message": "WHOIS privacy updated in name.com sandbox — no real domain affected."
+}
+```
+
+A `409` from name.com specifically means this domain/TLD doesn't support WHOIS privacy — surfaced as `EXTERNAL_API_ERROR`, not a code implying a transient/retryable failure.
+
+### Errors
+
+```text
+400 VALIDATION_ERROR
+
+401 AUTHENTICATION_REQUIRED
+
+403 PERMISSION_DENIED
+
+404 NOT_FOUND
+
+409 CONFLICT                — project.status != READY, or (from name.com) TLD doesn't support privacy
+
+502 EXTERNAL_API_TIMEOUT
+
+503 EXTERNAL_API_ERROR
+```
+
+---
+
+# 26. Get Launch Report
 
 ```http
 GET /api/v1/projects/{id}/launch-report/
@@ -1372,16 +1571,6 @@ Required.
   },
   "checks": [
     {
-      "type": "DNS_CONFIGURATION",
-      "status": "PASS",
-      "message": "DNS configuration is correct."
-    },
-    {
-      "type": "DNS_RESOLUTION",
-      "status": "PASS",
-      "message": "Domain resolves correctly."
-    },
-    {
       "type": "DOMAIN_READINESS",
       "status": "PASS",
       "message": "Domain is ready for launch."
@@ -1402,7 +1591,7 @@ If the project is not ready:
     "ready": false,
     "score": 66,
     "blocking_issues": [
-      "DNS resolution has not completed."
+      "Domain is not yet ready for launch."
     ]
   }
 }
@@ -1410,7 +1599,7 @@ If the project is not ready:
 
 ---
 
-# 26. Background Task Status
+# 27. Background Task Status
 
 React needs a way to determine whether asynchronous operations have completed.
 
@@ -1458,7 +1647,7 @@ Required.
 
 ---
 
-# 27. Endpoint Summary
+# 28. Endpoint Summary
 
 | Method | Endpoint                                        | Purpose                       | Async |
 | ------ | ------------------------------------------------ | ------------------------------ | ----- |
@@ -1475,21 +1664,24 @@ Required.
 | `POST` | `/api/v1/projects/{id}/select-brand/`            | Select brand                    | No    |
 | `POST` | `/api/v1/projects/{id}/domain-search/`           | Search domains (also used to regenerate) | Yes   |
 | `GET`  | `/api/v1/projects/{id}/domain-searches/`         | Search history                  | No    |
-| `GET`  | `/api/v1/projects/{id}/domains/`                 | Get domain results (now incl. pricing) | No    |
-| `POST` | `/api/v1/projects/{id}/recommend-domain/`        | AI picks best available domain  | Yes   |
+| `GET`  | `/api/v1/projects/{id}/domains/`                 | Get domain results (incl. pricing) | No    |
+| `POST` | `/api/v1/projects/{id}/recommend-domain/`        | AI picks best available domain (also used to regenerate) | Yes   |
+| `GET`  | `/api/v1/projects/{id}/domain-recommendations/`  | Get domain recommendation history | No |
 | `POST` | `/api/v1/domains/{id}/check-claims/`             | Trademark claims check          | Yes   |
 | `GET`  | `/api/v1/domains/{id}/claims/`                   | Get latest claims result        | No    |
 | `POST` | `/api/v1/projects/{id}/select-domain/`           | Select domain                   | No    |
-| `POST` | `/api/v1/domains/{id}/configure-dns/`            | Configure DNS records            | Yes   |
-| `POST` | `/api/v1/domains/{id}/check/`                    | Verify DNS/domain                | Yes   |
+| `POST` | `/api/v1/domains/{id}/create-dns-record/`        | Create a DNS record (live, name.com) | Yes |
+| `GET`  | `/api/v1/domains/{id}/dns-records/`              | List DNS records (live, name.com) | No  |
+| `POST` | `/api/v1/domains/{id}/check/`                    | Verify DNS/domain readiness      | Yes   |
 | `GET`  | `/api/v1/domains/{id}/checks/`                   | Get domain checks                | No    |
 | `POST` | `/api/v1/domains/{id}/simulate-registration/`    | Sandbox-only registration demo   | Yes   |
+| `POST` | `/api/v1/domains/{id}/toggle-privacy/`           | Toggle WHOIS privacy (sandbox-only; under review, Ticket 12) | Yes |
 | `GET`  | `/api/v1/projects/{id}/launch-report/`           | Get launch report                | No    |
 | `GET`  | `/api/v1/tasks/{task_id}/`                       | Get background task status       | No    |
 
 ---
 
-# 28. Authentication and Ownership Rules
+# 29. Authentication and Ownership Rules
 
 Every protected endpoint must verify:
 
@@ -1521,13 +1713,15 @@ DomainClaim.domain_result.project.user == request.user
 DomainRecommendation.project.user == request.user
 ```
 
+DNS records have no local model to check ownership against — ownership for `create-dns-record/`/`dns-records/` is enforced the same way as `check-claims/`/`simulate-registration/`/`toggle-privacy/`: via `domain_result.project.user`, since these endpoints hang off `/domains/{id}/`, not `/projects/{id}/...`.
+
 The API must never rely on React to enforce ownership.
 
 Authorization is always enforced by Django.
 
 ---
 
-# 29. External API Failure Contract
+# 30. External API Failure Contract
 
 External provider failures must be normalized into application-level errors.
 
@@ -1561,11 +1755,13 @@ External provider failures must be normalized into application-level errors.
 }
 ```
 
-The API must **not** expose raw provider responses or credentials. This applies equally to the claims-check and simulate-registration endpoints.
+The API must **not** expose raw provider responses or credentials. This applies equally to the claims-check, simulate-registration, toggle-privacy, and DNS record endpoints.
+
+`GET /api/v1/domains/{id}/dns-records/` is the one exception to the usual asynchronous pattern for provider errors: because it's a synchronous live proxy (§21.2), it can return `502`/`503` directly on the request itself rather than through a failed `TaskRecord`.
 
 ---
 
-# 30. AI Failure Contract
+# 31. AI Failure Contract
 
 If Gemini returns invalid structured data:
 
@@ -1598,7 +1794,7 @@ Invalid AI output must never be stored as a valid `BrandIdea`. The same rule app
 
 ---
 
-# 31. Important API Rules
+# 32. Important API Rules
 
 The API must enforce the following rules:
 
@@ -1610,18 +1806,18 @@ The API must enforce the following rules:
 6. Provider errors must not be interpreted as domain unavailability.
 7. AI output must be validated before persistence.
 8. Long-running external operations should run through Celery.
-9. PostgreSQL remains the source of truth.
+9. PostgreSQL remains the source of truth (except DNS records, which have no local model — name.com is the source of truth for those).
 10. React must never communicate directly with Gemini or name.com.
 11. Provider credentials must remain server-side.
 12. All API responses must use the documented JSON contract.
 13. Protected endpoints require a valid JWT access token.
 14. Access tokens must not be accepted from unauthenticated requests.
 15. API routes must remain versioned under `/api/v1/`.
-16. Simulate Registration must only ever call name.com's test/sandbox base URL. The client must refuse to run if configured against the production base URL.
+16. Simulate Registration and Toggle WHOIS Privacy must only ever call name.com's test/sandbox base URL. The client must refuse to run if configured against the production base URL.
 
 ---
 
-# 32. Complete Application Flow
+# 33. Complete Application Flow
 
 ```text
 React
@@ -1654,51 +1850,44 @@ name.com
 DomainResult[]  (now includes purchase_price / renewal_price / premium)
   │
   ├── POST /api/v1/projects/{id}/recommend-domain/  → Gemini → DomainRecommendation
+  │       (history: GET .../domain-recommendations/)
   ├── POST /api/v1/domains/{id}/check-claims/        → name.com → DomainClaim
   │
   │ POST /api/v1/projects/{id}/select-domain/
   ↓
 LaunchProject.selected_domain
   │
-  │ POST /api/v1/domains/{id}/configure-dns/
+  │ POST /api/v1/domains/{id}/check/   (DOMAIN_READINESS)
   ↓
 Celery
   │
   ↓
-name.com DNS API
+DomainCheck[]
   │
   ↓
-DNS records written
-  │
-  │ POST /api/v1/domains/{id}/check/
-  ↓
-Celery
-  │
-  ├── name.com
-  └── DNS
-        │
-        ↓
-   DomainCheck[]
-        │
-        ↓
 LaunchReadinessService
-        │
-        ↓
-      READY
-        │
-        ├── POST /api/v1/domains/{id}/simulate-registration/  (sandbox only)
-        │
-        │ GET /api/v1/projects/{id}/launch-report/
-        ↓
-      React
-        │
-        ↓
-  Launch-ready UI — incl. "Buy on name.com" outbound link (frontend-only)
+  │
+  ↓
+READY
+  │
+  ├── POST /api/v1/domains/{id}/simulate-registration/   (sandbox only)
+  │       │
+  │       └── POST /api/v1/domains/{id}/toggle-privacy/  (sandbox only)
+  │
+  ├── POST /api/v1/domains/{id}/create-dns-record/        (live, name.com — "Point your domain")
+  │   GET  /api/v1/domains/{id}/dns-records/               (live, name.com)
+  │
+  │ GET /api/v1/projects/{id}/launch-report/
+  ↓
+React
+  │
+  ↓
+Launch-ready UI — incl. "Buy on name.com" outbound link (frontend-only)
 ```
 
 ---
 
-# 33. React Integration
+# 34. React Integration
 
 The React frontend is an API consumer.
 
