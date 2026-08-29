@@ -6,7 +6,15 @@
 // gets `searchVersion` as a real dependency now (see the fixed
 // DomainRecommendationPanel) so regenerating actually clears the stale
 // pick instead of silently keeping it on screen.
-
+//
+// claimStatusByDomainId (Ticket 6) tracks each domain's trademark
+// claims check as "CHECKING" | "CLEAR" | "CLAIMED" | "ERROR" |
+// undefined, reported up from each card's DomainClaimsCheck (which now
+// runs automatically on mount instead of waiting for a click). This
+// replaced a plain claimedDomainIds Set: a Set can only say "yes/no
+// claimed", which meant a domain whose check hadn't run yet — or was
+// still in flight — read identically to "confirmed clear", so Select
+// was reachable before any check had actually completed.
 import { useEffect, useState } from "react";
 import { startDomainSearch, listDomainResults, selectDomain } from "../../api/domains";
 import { parseApiError } from "../../api/client";
@@ -21,7 +29,7 @@ export default function DomainStep({ project, onProjectUpdate }) {
   const [selectingDomainId, setSelectingDomainId] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [searchVersion, setSearchVersion] = useState(0);
-  const [claimedDomainIds, setClaimedDomainIds] = useState(() => new Set());
+  const [claimStatusByDomainId, setClaimStatusByDomainId] = useState(() => ({}));
   const domainSearchTask = useTaskPolling();
 
   useEffect(() => {
@@ -39,7 +47,7 @@ export default function DomainStep({ project, onProjectUpdate }) {
   useEffect(() => {
     if (domainSearchTask.state === "SUCCESS") {
       setDomains(domainSearchTask.result.results);
-      setClaimedDomainIds(new Set());
+      setClaimStatusByDomainId({});
       setSearchVersion((v) => v + 1);
     }
   }, [domainSearchTask.state, domainSearchTask.result]);
@@ -62,12 +70,8 @@ export default function DomainStep({ project, onProjectUpdate }) {
     }
   }
 
-  function handleClaimsChecked(domainId, hasClaims) {
-    setClaimedDomainIds((prev) => {
-      const next = new Set(prev);
-      hasClaims ? next.add(domainId) : next.delete(domainId);
-      return next;
-    });
+  function handleClaimsChecked(domainId, claimStatus) {
+    setClaimStatusByDomainId((prev) => ({ ...prev, [domainId]: claimStatus }));
   }
 
   const showFindDomainsButton = domains !== null && domains.length === 0;
@@ -76,7 +80,6 @@ export default function DomainStep({ project, onProjectUpdate }) {
     <div>
       <ErrorBanner error={loadError} />
       <ErrorBanner error={actionError || (domainSearchTask.state === "ERROR" ? domainSearchTask.error : null)} />
-
       {project.selected_domain && (
         <div className="rounded-sm border-2 border-live/40 bg-live/5 p-3">
           <p className="font-mono text-[10px] uppercase tracking-widest text-live">Selected domain</p>
@@ -85,11 +88,9 @@ export default function DomainStep({ project, onProjectUpdate }) {
           </p>
         </div>
       )}
-
       {domains === null && !loadError && (
         <p className="font-mono text-xs text-ink/40">Loading domain results…</p>
       )}
-
       {showFindDomainsButton && (
         <button
           onClick={handleFindDomains}
@@ -99,7 +100,6 @@ export default function DomainStep({ project, onProjectUpdate }) {
           {domainSearchTask.state === "LOADING" ? "Searching…" : "Find Domains"}
         </button>
       )}
-
       {domains && domains.length > 0 && !project.selected_domain && (
         <>
           <p className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink/40">
@@ -110,14 +110,13 @@ export default function DomainStep({ project, onProjectUpdate }) {
               <DomainCard
                 key={d.id}
                 domain={d}
-                isClaimed={claimedDomainIds.has(d.id)}
+                claimStatus={claimStatusByDomainId[d.id]}
                 selecting={selectingDomainId === d.id}
                 onSelect={handleSelectDomain}
                 onChecked={handleClaimsChecked}
               />
             ))}
           </div>
-
           <button
             onClick={handleFindDomains}
             disabled={domainSearchTask.state === "LOADING"}
@@ -125,7 +124,6 @@ export default function DomainStep({ project, onProjectUpdate }) {
           >
             {domainSearchTask.state === "LOADING" ? "Regenerating…" : "Not loving these? Regenerate"}
           </button>
-
           <div className="mt-3">
             <DomainRecommendationPanel projectId={project.id} triggerKey={searchVersion} />
           </div>
