@@ -318,13 +318,20 @@ class DomainSelectView(APIView):
 class DomainRecommendGenerateView(APIView):
     """
     Kicks off AI domain recommendation as a background task.
-    Validation that doesn't need Gemini (a search has run, at least one
-    AVAILABLE domain exists) happens synchronously here — only the
-    Gemini call and persistence step move into recommend_domain_task.
+    Validation that doesn't need Gemini (a search has completed, at
+    least one AVAILABLE domain exists) happens synchronously here —
+    only the Gemini call and persistence step move into
+    recommend_domain_task.
 
     Errors:
-      409 — no domain search has been completed for this project yet.
-      400 — a search exists but no AVAILABLE domains to recommend from.
+      409 — no domain search has completed for this project yet (a
+            PENDING/PROCESSING/FAILED search does not satisfy this —
+            audit fix, Ticket 9: previously this only checked that
+            *some* DomainSearch row existed, so an in-progress or
+            failed search slipped past here and was instead reported
+            as the less accurate 400 below).
+      400 — a completed search exists but no AVAILABLE domains to
+            recommend from.
     """
 
     permission_classes = [IsAuthenticated]
@@ -336,7 +343,10 @@ class DomainRecommendGenerateView(APIView):
             user=request.user,
         )
 
-        if not DomainSearch.objects.filter(project=project).exists():
+        if not DomainSearch.objects.filter(
+            project=project,
+            status=DomainSearch.Status.COMPLETED,
+        ).exists():
             return api_error(
                 code="CONFLICT",
                 message="No domain search has been completed for this project yet.",

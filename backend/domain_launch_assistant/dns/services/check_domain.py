@@ -20,6 +20,23 @@ class CheckDomainUnsupportedTypeError(CheckDomainError):
     pass
 
 
+class CheckDomainMissingHandlerError(CheckDomainError):
+    """
+    Raised if run_checks() is ever asked to run a check_type with no
+    entry in _HANDLERS. Should be unreachable in practice — every
+    check_type not in _HANDLERS is currently also listed in
+    UNSUPPORTED_CHECK_TYPES, which validate_check_types() rejects
+    synchronously in the view before any DomainCheck row is created.
+    This exists only so that if that guard is ever loosened without a
+    handler being added at the same time, the failure is an explicit,
+    named error instead of a bare KeyError — and, since Ticket 2, this
+    is raised from inside run_domain_checks_task's try/except Exception
+    block, so it surfaces as a normal TaskRecord FAILURE (logged via
+    logger.exception) rather than leaving the task stuck PROCESSING.
+    """
+    pass
+
+
 class CheckDomainService:
     """
     Split like DomainSearchService: validate + create PENDING
@@ -54,7 +71,17 @@ class CheckDomainService:
         ]
 
     def run_checks(self, checks: list[DomainCheck]) -> list[DomainCheck]:
-        return [self._HANDLERS[check.check_type](self, check) for check in checks]
+        results = []
+        for check in checks:
+            handler = self._HANDLERS.get(check.check_type)
+            if handler is None:
+                raise CheckDomainMissingHandlerError(
+                    f"No handler registered for check_type={check.check_type!r}. "
+                    "This check_type was accepted by validate_check_types() but "
+                    "has no corresponding entry in CheckDomainService._HANDLERS."
+                )
+            results.append(handler(self, check))
+        return results
 
     def _run_dns_resolution(self, check: DomainCheck) -> DomainCheck:
         domain_result = check.domain_result
