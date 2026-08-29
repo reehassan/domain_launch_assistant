@@ -9,12 +9,18 @@
 // negative result), and a domain result that's neither AVAILABLE nor
 // TAKEN isn't "not started yet" either. Collapsing those loses a
 // distinction the API is making on purpose.
+//
+// FIX (light-theme pass): "hold" used to reach for stock Tailwind
+// amber-500/amber-400, the only variant not drawn from the app's own
+// palette. It's now the `hold` token defined alongside every other
+// semantic color in tailwind.config.js, tuned dark enough to stay
+// legible on a white card.
 
 const VARIANTS = {
   done: { className: "border-live text-live animate-stamp-drop", icon: "✓" },
   pending: { className: "border-dashed border-hairline text-ink/30", icon: "○" },
   loading: { className: "border-wire text-wire animate-stamp-hover", icon: "◌" },
-  hold: { className: "border-amber-500 text-amber-600", icon: "!" },
+  hold: { className: "border-hold text-hold", icon: "!" },
   error: { className: "border-reject text-reject animate-stamp-drop", icon: "✕" },
 };
 
