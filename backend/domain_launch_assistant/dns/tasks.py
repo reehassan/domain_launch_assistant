@@ -29,33 +29,56 @@ def run_domain_checks_task(task_id: str, check_ids: list[str]) -> None:
     PENDING. project.status = VERIFYING_DNS is set here, at the start
     of the task — not in the view — so the frontend never sees
     "verifying" before a worker has actually picked the job up.
+
+    Wrapped in the same try/except Exception -> FAILURE pattern every
+    other task in this app uses (audit fix — Ticket 2). This used to
+    skip that wrapper on the reasoning that
+    CheckDomainService.run_checks() cannot raise — the one exception
+    type in that service (CheckDomainUnsupportedTypeError) is validated
+    synchronously in the view before this task is ever dispatched, and
+    DNS lookup failures are already caught inside the handlers
+    themselves as FAIL/ERROR check rows, not exceptions. That reasoning
+    is still true for run_checks() itself, but never covered the line
+    right before it: `checks[0]` raises an uncaught IndexError if
+    check_ids is ever empty, and with no safety net the TaskRecord was
+    left stuck PROCESSING forever — the frontend's poll loop had no
+    FAILURE state to ever land on. This wrapper is defense-in-depth
+    against that case (and anything else unexpected), not a sign
+    run_checks() is now expected to raise routinely.
     """
     task = TaskRecord.objects.get(task_id=task_id)
     task.status = TaskRecord.Status.PROCESSING
     task.save(update_fields=["status"])
 
-    checks = list(DomainCheck.objects.filter(id__in=check_ids))
-    project = checks[0].project
-    project.status = LaunchProject.Status.VERIFYING_DNS
-    project.save(update_fields=["status"])
-
-    # No try/except here: CheckDomainService.run_checks() cannot raise —
-    # the one exception type in this service (CheckDomainUnsupportedTypeError)
-    # is validated synchronously in the view before this task is ever
-    # dispatched, and DNS lookup failures are already caught inside the
-    # handlers themselves as FAIL/ERROR check rows, not exceptions.
-    ran_checks = CheckDomainService().run_checks(checks)
-
-    # Project only reaches READY once every requested check type has
-    # actually PASSed — a single FAIL or ERROR must not silently let
-    # the founder past DNS verification into Feature 5/6. On anything
-    # less than all-PASS, project.status stays VERIFYING_DNS (already
-    # set above) so the founder can re-run check/ after fixing DNS.
-    if all(c.status == DomainCheck.Status.PASS for c in ran_checks):
-        project.status = LaunchProject.Status.READY
+    try:
+        checks = list(DomainCheck.objects.filter(id__in=check_ids))
+        project = checks[0].project
+        project.status = LaunchProject.Status.VERIFYING_DNS
         project.save(update_fields=["status"])
 
-    rendered = JSONRenderer().render(DomainCheckSerializer(checks, many=True).data)
+        ran_checks = CheckDomainService().run_checks(checks)
+
+        # Project only reaches READY once every requested check type has
+        # actually PASSed — a single FAIL or ERROR must not silently let
+        # the founder past DNS verification into Feature 5/6. On anything
+        # less than all-PASS, project.status stays VERIFYING_DNS (already
+        # set above) so the founder can re-run check/ after fixing DNS.
+        if all(c.status == DomainCheck.Status.PASS for c in ran_checks):
+            project.status = LaunchProject.Status.READY
+            project.save(update_fields=["status"])
+
+        rendered = JSONRenderer().render(DomainCheckSerializer(checks, many=True).data)
+    except Exception:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = "Something went wrong. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        logger.exception(
+            "Unhandled error in run_domain_checks_task",
+            extra={"task_id": task_id, "check_ids": check_ids},
+        )
+        return
+
     task.status = TaskRecord.Status.SUCCESS
     task.result = {"results": json.loads(rendered)}
     task.save(update_fields=["status", "result"])
