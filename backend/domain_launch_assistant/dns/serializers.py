@@ -49,3 +49,33 @@ class DomainCheckSerializer(serializers.ModelSerializer):
             "checked_at",
         ]
         read_only_fields = fields
+
+
+class DnsRecordCreateRequestSerializer(serializers.Serializer):
+    """
+    Validates the request body for POST /domains/{id}/create-dns-record/
+
+    Field set matches name.com's documented DNSCreateRecordBody exactly
+    (docs.name.com's DNS Create Record reference) — host, type, answer,
+    ttl, priority. No local model backs this, so there's no
+    ModelSerializer for the response side; the created Record dict
+    comes straight back from name.com via the task result, same pattern
+    simulate_registration_task already uses for its plain-dict result.
+    """
+
+    RECORD_TYPES = ["A", "AAAA", "ANAME", "CNAME", "MX", "NS", "SRV", "TXT"]
+
+    host = serializers.CharField(required=False, allow_blank=True, default="")
+    type = serializers.ChoiceField(choices=RECORD_TYPES, required=True)
+    answer = serializers.CharField(required=True, allow_blank=False)
+    ttl = serializers.IntegerField(required=False, default=300, min_value=300)
+    priority = serializers.IntegerField(required=False, allow_null=True, default=None)
+
+    def validate(self, data):
+        # Per name.com's docs: priority is required for MX and SRV
+        # records, ignored for all others.
+        if data["type"] in ("MX", "SRV") and data.get("priority") is None:
+            raise serializers.ValidationError(
+                {"priority": "priority is required for MX and SRV records."}
+            )
+        return data
