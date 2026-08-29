@@ -1,6 +1,7 @@
 # domain_launch_assistant/dns/tests/test_dns.py
 
 import socket
+import uuid
 from unittest.mock import patch
 
 import pytest
@@ -216,6 +217,44 @@ class TestCheckDomain:
             format="json",
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_check_returns_409_when_task_already_in_progress(
+        self, auth_client_a, project_a, domain_result_a
+    ):
+        """
+        Ticket 3 — concurrency guard. Every other mutating dispatch view
+        (DnsRecordCreateView, DomainSearchStartView, etc.) checks
+        TaskRecord.has_active_task(project) before dispatching;
+        CheckDomainView was missing it, allowing a double-click / racing
+        request to fire two run_domain_checks_task runs for the same
+        project.
+
+        A PENDING TaskRecord is created directly rather than firing two
+        real POSTs: with CELERY_TASK_ALWAYS_EAGER=True (see every other
+        test in this class asserting task.status == SUCCESS/FAILURE
+        immediately after the view returns), a first .delay() call
+        already resolves synchronously before any "second" request could
+        exist to race it — so two real requests couldn't actually
+        exercise has_active_task() under these test settings. Creating
+        the blocking TaskRecord directly tests the guard itself,
+        independent of Celery's execution mode.
+        """
+        TaskRecord.objects.create(
+            task_id=uuid.uuid4(),
+            project=project_a,
+            status=TaskRecord.Status.PENDING,
+        )
+
+        response = auth_client_a.post(
+            f"/api/v1/domains/{domain_result_a.id}/check/",
+            {"check_types": ["DNS_RESOLUTION"]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert response.data["error"]["code"] == "CONFLICT"
+        # Nothing should be created for the rejected request.
+        assert DomainCheck.objects.filter(domain_result=domain_result_a).count() == 0
 
 
 class TestListDomainChecks:
