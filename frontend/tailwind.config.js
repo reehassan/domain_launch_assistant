@@ -4,13 +4,20 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: "#14171F",
-        paper: "#F7F6F2",
-        signal: "#FF5A36",
-        live: "#1FAA59",
-        wire: "#4C5FD5",
-        hairline: "#E4E2DA",
-        reject: "#DC2626",
+        // ---- Light theme, greenish/black/white (name.com-inspired) ----
+        // Same semantic token names as before — every component that
+        // referenced bg-paper / text-ink / border-hairline / bg-signal
+        // etc. re-themes automatically just from these values changing.
+        paper: "#F6F8F5",     // page background — warm off-white, faint green tint
+        surface: "#FFFFFF",   // card background
+        elevated: "#EEF5F0",  // highlighted box (AI pick, selected state) — pale mint
+        ink: "#11151A",       // near-black text
+        hairline: "#E2E6E1",  // borders/dividers
+        signal: "#0E7A50",    // primary action green — the one confident accent
+        live: "#1D9A6C",      // success/"done" green — distinct from signal
+        wire: "#0F6E7A",      // secondary/AI accent — deep teal, stays in the green family
+        hold: "#A16207",      // amber — now a real token instead of stock amber-500
+        reject: "#C23434",    // error red
       },
       fontFamily: {
         display: ["Space Grotesk", "sans-serif"],

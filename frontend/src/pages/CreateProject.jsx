@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { createProject } from "../api/projects";
 import { parseApiError } from "../api/client";
 import ErrorBanner from "../components/ErrorBanner";
+import Logo from "../components/Logo";
 
 export default function CreateProject() {
   const navigate = useNavigate();
@@ -25,32 +26,65 @@ export default function CreateProject() {
   }
 
   return (
-    <div className="mx-auto mt-12 max-w-lg p-6">
-      <h1 className="mb-4 text-xl font-semibold">Create Project</h1>
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <input
-          className="w-full rounded border p-2"
-          placeholder="Project name"
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          required
-        />
-        <textarea
-          className="h-28 w-full rounded border p-2"
-          placeholder="Describe the business…"
-          value={form.business_description}
-          onChange={(e) => setForm({ ...form, business_description: e.target.value })}
-          required
-        />
-        <ErrorBanner error={error} />
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded bg-black p-2 text-white disabled:opacity-50"
+    <div className="min-h-screen bg-paper px-4 py-10">
+      <div className="mx-auto max-w-lg">
+        <Link
+          to="/dashboard"
+          className="font-mono text-xs uppercase tracking-wider text-ink/40 underline decoration-dotted hover:text-ink"
         >
-          {loading ? "Creating…" : "Create Project"}
-        </button>
-      </form>
+          ← Back to Dashboard
+        </Link>
+
+        <div className="mt-6 mb-6 flex items-center gap-3">
+          <Logo size="sm" withWordmark={false} />
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-widest text-ink/40">
+              New Manifest
+            </p>
+            <h1 className="font-display text-xl font-bold text-ink">Tell us about the business</h1>
+          </div>
+        </div>
+
+        <div className="rounded-sm border-2 border-hairline bg-surface p-6 shadow-sm">
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="mb-1 block font-mono text-[10px] uppercase tracking-widest text-ink/40">
+                Project name
+              </label>
+              <input
+                className="w-full rounded-sm border border-hairline bg-paper px-3 py-2 text-sm text-ink placeholder:text-ink/30 outline-none transition focus:border-signal focus:ring-1 focus:ring-signal/30"
+                placeholder="e.g. Acme Coffee Co."
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                required
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="mb-1 block font-mono text-[10px] uppercase tracking-widest text-ink/40">
+                Business description
+              </label>
+              <textarea
+                className="h-28 w-full rounded-sm border border-hairline bg-paper px-3 py-2 text-sm text-ink placeholder:text-ink/30 outline-none transition focus:border-signal focus:ring-1 focus:ring-signal/30"
+                placeholder="What does this business do, and who is it for?"
+                value={form.business_description}
+                onChange={(e) => setForm({ ...form, business_description: e.target.value })}
+                required
+              />
+            </div>
+
+            <ErrorBanner error={error} />
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-sm bg-signal py-2.5 font-display text-xs font-bold uppercase tracking-wide text-white transition hover:bg-signal/90 disabled:opacity-50"
+            >
+              {loading ? "Creating…" : "Create Project"}
+            </button>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }
