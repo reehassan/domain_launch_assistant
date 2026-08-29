@@ -117,15 +117,16 @@ export function parseApiError(error) {
 }
 
 // ---- Auth-specific calls -------------------------------------------------
-// Login response is ONLY { access, refresh } — no user object (confirmed:
-// LoginView is a bare TokenObtainPairView). So login() also fetches /me/
-// immediately after, per the Option B decision, and returns the user too.
+// Login response is { access, refresh, user } — LoginView uses a custom
+// LoginSerializer (TokenObtainPairSerializer subclass) that injects
+// data["user"] = UserSerializer(self.user).data on top of the usual
+// token pair, so the extra GET auth/me/ round trip this used to make
+// right after login was redundant (audit fix — Ticket 8). user here is
+// the same shape UserSerializer/getMe() already return elsewhere.
 export async function login({ username, password }) {
   const { data } = await client.post("auth/login/", { username, password });
   tokenStore.setTokens({ access: data.access, refresh: data.refresh });
-
-  const { data: user } = await client.get("auth/me/");
-  return user;
+  return data.user;
 }
 
 export async function register({ username, email, password, first_name, last_name }) {
