@@ -1,14 +1,21 @@
 // frontend/src/components/DomainClaimsCheck.jsx
 //
-// Self-contained "Check for trademark claims" widget for a single
-// AVAILABLE domain result. Owns its own useTaskPolling() instance so
-// multiple rows can each have an in-flight check without clobbering
-// each other's state — see ProjectDetails.jsx for why this isn't a
-// single shared task instance.
+// Self-contained "trademark claims" checker for a single AVAILABLE
+// domain result. Runs automatically as soon as it mounts (Ticket 6 —
+// the check used to be an optional manual click, which meant a
+// founder could select a domain without it ever running; the fix
+// makes it non-optional by kicking off the check the moment the card
+// appears, instead of waiting for a click).
 //
-// Reports has_claims back up via onChecked(domainId, hasClaims) so the
-// parent row can disable "Select" on a claimed domain and steer the
-// founder toward picking a different one instead.
+// Owns its own useTaskPolling() instance so multiple rows can each
+// have an in-flight check without clobbering each other's state — see
+// ProjectDetails.jsx for why this isn't a single shared task instance.
+//
+// Reports its status back up via onChecked(domainId, status), where
+// status is one of "CHECKING" | "CLEAR" | "CLAIMED" | "ERROR" — the
+// parent (DomainStep/DomainCard) uses this to withhold the "Select"
+// action until the check has actually resolved to CLEAR, closing the
+// race where Select could otherwise render before the check completes.
 //
 // claims_data shape (name.com's Check Domain Claims response — see
 // docs.name.com/api/v1/reference/domain-info/check-domain-claims):
@@ -17,7 +24,6 @@
 // The claimId/notBefore/notAfter that identify the claim itself are
 // top-level fields, not per-entry — each item in `claims` (when present)
 // is a TrademarkClaim: {trademark, holder, jurisdiction, ...}.
-
 import { useEffect } from "react";
 import { checkDomainClaims } from "../api/domains";
 import { useTaskPolling } from "../hooks/useTaskPolling";
@@ -26,13 +32,22 @@ import StampBadge from "./StampBadge";
 export default function DomainClaimsCheck({ domainId, onChecked }) {
   const claimsTask = useTaskPolling();
 
-  async function handleCheck() {
-    await claimsTask.run(() => checkDomainClaims(domainId));
-  }
+  // Kick off the check the moment this domain's card mounts — no
+  // click required. DomainCard only mounts this for AVAILABLE
+  // results, so every selectable domain gets checked automatically.
+  useEffect(() => {
+    claimsTask.run(() => checkDomainClaims(domainId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [domainId]);
 
   useEffect(() => {
-    if (claimsTask.state === "SUCCESS" && claimsTask.result && onChecked) {
-      onChecked(domainId, claimsTask.result.has_claims);
+    if (!onChecked) return;
+    if (claimsTask.state === "SUCCESS" && claimsTask.result) {
+      onChecked(domainId, claimsTask.result.has_claims ? "CLAIMED" : "CLEAR");
+    } else if (claimsTask.state === "ERROR") {
+      onChecked(domainId, "ERROR");
+    } else if (claimsTask.state === "LOADING") {
+      onChecked(domainId, "CHECKING");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claimsTask.state, claimsTask.result]);
@@ -41,7 +56,6 @@ export default function DomainClaimsCheck({ domainId, onChecked }) {
     const claim = claimsTask.result;
     const data = claim.claims_data ?? {};
     const trademarkEntries = data.claims ?? [];
-
     return (
       <div className="mt-2 rounded-sm border border-hairline p-2">
         <div className="flex items-center justify-between">
@@ -74,18 +88,28 @@ export default function DomainClaimsCheck({ domainId, onChecked }) {
     );
   }
 
+  if (claimsTask.state === "ERROR") {
+    return (
+      <div className="mt-2">
+        <p className="font-mono text-[11px] text-reject">
+          {claimsTask.error?.message ?? "Trademark check failed."}
+        </p>
+        <button
+          onClick={() => claimsTask.run(() => checkDomainClaims(domainId))}
+          className="mt-1 rounded-sm border border-wire px-3 py-1 font-mono text-xs uppercase text-wire"
+        >
+          Retry check
+        </button>
+      </div>
+    );
+  }
+
+  // IDLE (briefly, before the mount effect fires) or LOADING — the
+  // check is automatic now, so this is just a status line, not a
+  // call-to-action button anymore.
   return (
     <div className="mt-2">
-      <button
-        onClick={handleCheck}
-        disabled={claimsTask.state === "LOADING"}
-        className="rounded-sm border border-wire px-3 py-1 font-mono text-xs uppercase text-wire disabled:opacity-50"
-      >
-        {claimsTask.state === "LOADING" ? "Checking…" : "Check for Trademark Claims"}
-      </button>
-      {claimsTask.state === "ERROR" && claimsTask.error && (
-        <p className="mt-1 font-mono text-[11px] text-reject">{claimsTask.error.message}</p>
-      )}
+      <p className="font-mono text-xs text-ink/40">Checking for trademark claims…</p>
     </div>
   );
 }
