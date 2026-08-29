@@ -231,6 +231,13 @@ class DomainSelectView(APIView):
     Enforces api-contract.md section 28 rules:
       #4 Only available domains can be selected.
       #5 Stale domain availability must be refreshed before selection.
+      #6 A domain with an active trademark claim cannot be selected
+         (Ticket 6). This is a server-side backstop, not the primary
+         UX: DomainClaimsCheck now runs automatically as soon as a
+         domain card mounts (frontend), and DomainStep withholds the
+         "Select" button until that check resolves to CLEAR. This
+         check exists so the same rule holds for a direct API call
+         that bypasses the frontend entirely, not just the UI gate.
     """
 
     permission_classes = [IsAuthenticated]
@@ -271,6 +278,27 @@ class DomainSelectView(APIView):
             return api_error(
                 code="CONFLICT",
                 message="Domain availability is stale and must be refreshed before selection.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+
+        # Rule #6 — a domain with an active trademark claim cannot be
+        # selected. DomainClaim is append-only (Meta.ordering =
+        # ["-checked_at"]), so the latest row is this domain's current
+        # verdict. No claim on record yet is treated as not-blocking
+        # here — the frontend now always runs a check before Select
+        # ever renders, so in practice a claim row will already exist
+        # by the time this is reachable through the UI; this guard's
+        # job is only to make a claimed domain unselectable, not to
+        # additionally mandate that a check has run at all.
+        latest_claim = (
+            DomainClaim.objects.filter(domain_result=domain_result)
+            .order_by("-checked_at")
+            .first()
+        )
+        if latest_claim is not None and latest_claim.has_claims:
+            return api_error(
+                code="CONFLICT",
+                message="This domain has active trademark claims and cannot be selected.",
                 status_code=status.HTTP_409_CONFLICT,
             )
 
