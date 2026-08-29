@@ -164,17 +164,59 @@ class DomainRegistrationSimulationService:
             raise DomainRegistrationSimulationTimeoutError(str(exc)) from exc
         except NameComAPIError as exc:
             raise DomainRegistrationSimulationProviderError(str(exc)) from exc
-        # ASSUMPTION — not verified against a real sandbox payload: Create
-        # Domain's exact response shape wasn't available in name.com's
-        # public docs when this was written. `orderId` is name.com's
-        # documented field for order identifiers elsewhere in the API
-        # (List/Get Order), so it's used here if present. If the sandbox
-        # response omits it, a synthesized identifier is used instead —
-        # a missing display field must never fail an otherwise-successful
-        # sandbox registration.
-        order_id = raw.get("orderId") or f"sandbox-{domain_result.domain}"
+        # CONFIRMED against a real name.com sandbox response
+        # (2026-08-29, verified manually against a live Create Domain
+        # call): the created order's identifier is the top-level
+        # integer field `order` — `orderId` does not appear anywhere
+        # in the response and was always silently falling through to
+        # the synthesized fallback below. Cast to str since this is a
+        # display identifier, not something arithmetic is ever done
+        # on. The synthesized fallback is kept for defense-in-depth
+        # only (e.g. a future sandbox API version dropping the field)
+        # — a missing display field must never fail an otherwise-
+        # successful sandbox registration.
+        order_id = (
+            str(raw["order"])
+            if raw.get("order") is not None
+            else f"sandbox-{domain_result.domain}"
+        )
+        # CONFIRMED against the same live sandbox response used to
+        # verify `order` above: privacyEnabled is a plain boolean
+        # nested under the top-level `domain` object. Read here at
+        # zero extra cost — no second provider call — since this
+        # comes back on the exact same Create Domain response already
+        # captured above.
+        privacy_enabled = raw.get("domain", {}).get("privacyEnabled")
         return {
             "simulated": True,
             "order_id": order_id,
+            "privacy_enabled": privacy_enabled,
             "message": "Registered in name.com sandbox — no real domain or charge.",
+        }
+
+    def toggle_privacy(self, domain_name: str, enabled: bool) -> dict:
+        """
+        Toggles WHOIS privacy for a domain already registered in the
+        sandbox (via simulate_registration). Reuses this same
+        instance's sandbox-only NameComClient — the constructor guard
+        already refused to build at all unless NAMECOM_TEST_BASE_URL
+        resolves to the sandbox host, so no second guard is needed
+        here.
+
+        Raises the same typed errors as simulate_registration, for the
+        same reasons — including on a 409 from name.com, which per
+        their docs specifically means this domain/TLD doesn't support
+        WHOIS privacy, not a transient failure.
+        """
+        try:
+            raw = self.namecom_client.update_domain_privacy(domain_name, enabled)
+        except NameComTimeoutError as exc:
+            raise DomainRegistrationSimulationTimeoutError(str(exc)) from exc
+        except NameComAPIError as exc:
+            raise DomainRegistrationSimulationProviderError(str(exc)) from exc
+
+        return {
+            "domain": raw.get("domainName", domain_name),
+            "privacy_enabled": raw.get("privacyEnabled"),
+            "message": "WHOIS privacy updated in name.com sandbox — no real domain affected.",
         }

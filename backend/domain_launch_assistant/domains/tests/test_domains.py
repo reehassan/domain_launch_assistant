@@ -982,7 +982,14 @@ class TestSimulateRegistration:
 
         with _mock_registration_namecom() as MockClient:
             instance = MockClient.return_value
-            instance.register_domain.return_value = {"orderId": "sb-12345"}
+            # Real sandbox shape confirmed 2026-08-29: top-level int
+            # `order`, not `orderId`, and privacyEnabled nested under
+            # `domain` — see namecom.py's register_domain docstring.
+            instance.register_domain.return_value = {
+                "domain": {"domainName": "ledgerflow.ai", "privacyEnabled": True},
+                "order": 2132074,
+                "totalPaid": 19.99,
+            }
             response = auth_client_a.post(
                 f"/api/v1/domains/{result.id}/simulate-registration/",
                 format="json",
@@ -994,7 +1001,8 @@ class TestSimulateRegistration:
         task = TaskRecord.objects.get(task_id=response.data["task_id"])
         assert task.status == TaskRecord.Status.SUCCESS
         assert task.result["simulated"] is True
-        assert task.result["order_id"] == "sb-12345"
+        assert task.result["order_id"] == "2132074"
+        assert task.result["privacy_enabled"] is True
 
     def test_simulate_registration_missing_order_id_falls_back(
         self, auth_client_a, project_a, brand_idea_a
@@ -1129,6 +1137,160 @@ class TestSimulateRegistration:
         client = APIClient()
         response = client.post(
             f"/api/v1/domains/{result.id}/simulate-registration/",
+            format="json",
+        )
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+class TestTogglePrivacy:
+    def test_toggle_privacy_enable_success(self, auth_client_a, project_a, brand_idea_a):
+        search = _create_search(project_a, brand_idea_a)
+        result = _create_domain_result(project_a, search, domain="ledgerflow.ai", available=True)
+        project_a.status = LaunchProject.Status.READY
+        project_a.save(update_fields=["status"])
+
+        with _mock_registration_namecom() as MockClient:
+            instance = MockClient.return_value
+            instance.update_domain_privacy.return_value = {
+                "domainName": "ledgerflow.ai",
+                "privacyEnabled": True,
+            }
+            response = auth_client_a.post(
+                f"/api/v1/domains/{result.id}/toggle-privacy/",
+                {"enabled": True},
+                format="json",
+            )
+
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        assert response.data["domain_id"] == str(result.id)
+
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.SUCCESS
+        assert task.result["privacy_enabled"] is True
+        assert task.result["domain"] == "ledgerflow.ai"
+        instance.update_domain_privacy.assert_called_once_with("ledgerflow.ai", True)
+
+    def test_toggle_privacy_disable_success(self, auth_client_a, project_a, brand_idea_a):
+        search = _create_search(project_a, brand_idea_a)
+        result = _create_domain_result(project_a, search, domain="ledgerflow.ai", available=True)
+        project_a.status = LaunchProject.Status.READY
+        project_a.save(update_fields=["status"])
+
+        with _mock_registration_namecom() as MockClient:
+            instance = MockClient.return_value
+            instance.update_domain_privacy.return_value = {
+                "domainName": "ledgerflow.ai",
+                "privacyEnabled": False,
+            }
+            response = auth_client_a.post(
+                f"/api/v1/domains/{result.id}/toggle-privacy/",
+                {"enabled": False},
+                format="json",
+            )
+
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.SUCCESS
+        assert task.result["privacy_enabled"] is False
+        instance.update_domain_privacy.assert_called_once_with("ledgerflow.ai", False)
+
+    def test_toggle_privacy_missing_enabled_field(self, auth_client_a, project_a, brand_idea_a):
+        search = _create_search(project_a, brand_idea_a)
+        result = _create_domain_result(project_a, search, domain="ledgerflow.ai", available=True)
+        project_a.status = LaunchProject.Status.READY
+        project_a.save(update_fields=["status"])
+
+        response = auth_client_a.post(
+            f"/api/v1/domains/{result.id}/toggle-privacy/",
+            {},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data["error"]["code"] == "VALIDATION_ERROR"
+
+    def test_toggle_privacy_not_ready_returns_409(
+        self, auth_client_a, project_a, brand_idea_a
+    ):
+        search = _create_search(project_a, brand_idea_a)
+        result = _create_domain_result(project_a, search, domain="ledgerflow.ai", available=True)
+        # project_a.status defaults to DRAFT — never advanced to READY.
+        response = auth_client_a.post(
+            f"/api/v1/domains/{result.id}/toggle-privacy/",
+            {"enabled": True},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert response.data["error"]["code"] == "CONFLICT"
+
+    def test_toggle_privacy_provider_timeout_marks_task_failed(
+        self, auth_client_a, project_a, brand_idea_a
+    ):
+        search = _create_search(project_a, brand_idea_a)
+        result = _create_domain_result(project_a, search, domain="ledgerflow.ai", available=True)
+        project_a.status = LaunchProject.Status.READY
+        project_a.save(update_fields=["status"])
+
+        with _mock_registration_namecom() as MockClient:
+            instance = MockClient.return_value
+            instance.update_domain_privacy.side_effect = NameComTimeoutError("timed out")
+            response = auth_client_a.post(
+                f"/api/v1/domains/{result.id}/toggle-privacy/",
+                {"enabled": True},
+                format="json",
+            )
+
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.FAILURE
+        assert task.error_code == "EXTERNAL_API_TIMEOUT"
+
+    def test_toggle_privacy_provider_conflict_marks_task_failed(
+        self, auth_client_a, project_a, brand_idea_a
+    ):
+        """
+        A 409 from name.com (TLD doesn't support WHOIS privacy) surfaces
+        as EXTERNAL_API_ERROR, same as any other provider-side 4xx.
+        """
+        search = _create_search(project_a, brand_idea_a)
+        result = _create_domain_result(project_a, search, domain="ledgerflow.ai", available=True)
+        project_a.status = LaunchProject.Status.READY
+        project_a.save(update_fields=["status"])
+
+        with _mock_registration_namecom() as MockClient:
+            instance = MockClient.return_value
+            instance.update_domain_privacy.side_effect = NameComAPIError(
+                "name.com returned client error 409: privacy not supported"
+            )
+            response = auth_client_a.post(
+                f"/api/v1/domains/{result.id}/toggle-privacy/",
+                {"enabled": True},
+                format="json",
+            )
+
+        task = TaskRecord.objects.get(task_id=response.data["task_id"])
+        assert task.status == TaskRecord.Status.FAILURE
+        assert task.error_code == "EXTERNAL_API_ERROR"
+
+    def test_toggle_privacy_other_users_domain_fails(
+        self, auth_client_a, project_b, brand_idea_b
+    ):
+        search = _create_search(project_b, brand_idea_b)
+        result = _create_domain_result(project_b, search, domain="theirs.ai", available=True)
+        project_b.status = LaunchProject.Status.READY
+        project_b.save(update_fields=["status"])
+
+        response = auth_client_a.post(
+            f"/api/v1/domains/{result.id}/toggle-privacy/",
+            {"enabled": True},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_toggle_privacy_unauthenticated(self, project_a, brand_idea_a):
+        search = _create_search(project_a, brand_idea_a)
+        result = _create_domain_result(project_a, search, domain="ledgerflow.ai", available=True)
+        client = APIClient()
+        response = client.post(
+            f"/api/v1/domains/{result.id}/toggle-privacy/",
+            {"enabled": True},
             format="json",
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
