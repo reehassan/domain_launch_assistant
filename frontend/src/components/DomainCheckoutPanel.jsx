@@ -13,12 +13,18 @@
 // DomainClaimsCheck.jsx / DomainRecommendationPanel.jsx: this panel's
 // in-flight request shouldn't be tangled with any other section's
 // loading state.
+//
+// onRegistered (Feature 7) is an optional callback fired once with the
+// receipt when checkout succeeds — LaunchStep uses it to know when to
+// reveal DomainDnsPanel. Purely additive: any existing caller that
+// doesn't pass it behaves exactly as before.
+import { useEffect } from "react";
 import { simulateRegistration } from "../api/domains";
 import { useTaskPolling } from "../hooks/useTaskPolling";
 import StampBadge from "./StampBadge";
 import ErrorBanner from "./ErrorBanner";
 
-export default function DomainCheckoutPanel({ domain }) {
+export default function DomainCheckoutPanel({ domain, onRegistered }) {
   const checkoutTask = useTaskPolling();
 
   async function handleCheckout() {
@@ -28,6 +34,13 @@ export default function DomainCheckoutPanel({ domain }) {
   const isLoading = checkoutTask.state === "LOADING";
   // task.result on SUCCESS: { simulated: true, order_id, message }
   const receipt = checkoutTask.state === "SUCCESS" ? checkoutTask.result : null;
+
+  useEffect(() => {
+    if (receipt && onRegistered) {
+      onRegistered(receipt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receipt]);
 
   return (
     <div className="px-6 py-5">

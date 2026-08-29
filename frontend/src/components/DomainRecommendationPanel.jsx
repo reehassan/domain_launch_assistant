@@ -5,45 +5,65 @@
 // project (if any) via GET /domain-recommendations/, so a page refresh
 // shows the last pick without re-calling Gemini. The button re-POSTs
 // /recommend-domain/ and, once the task succeeds, replaces the shown
-// recommendation with the new one — same latest-by-created_at convention
-// the brand/domain "Regenerate" buttons already use elsewhere in this file.
+// recommendation with the new one.
+//
+// FIX: `triggerKey` was previously accepted by the caller but never
+// destructured or read here, so a domain-search regenerate silently did
+// NOT refresh the recommendation despite the calling code (and its own
+// comments) implying it would. It's now watched explicitly: whenever it
+// changes, we clear the stale recommendation so the old pick can't be
+// shown against a domain list that's already been replaced.
 //
 // Owns its own useTaskPolling() instance, same reasoning as
 // DomainClaimsCheck.jsx: this panel's in-flight request shouldn't be
 // tangled with any other section's loading state.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { recommendDomain, getDomainRecommendations } from "../api/domains";
 import { useTaskPolling } from "../hooks/useTaskPolling";
 import { parseApiError } from "../api/client";
 import StampBadge from "./StampBadge";
 
-export default function DomainRecommendationPanel({ projectId }) {
+export default function DomainRecommendationPanel({ projectId, triggerKey }) {
   const [recommendation, setRecommendation] = useState(null);
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [initialError, setInitialError] = useState(null);
+  const isFirstRun = useRef(true);
 
   const recommendTask = useTaskPolling();
 
   useEffect(() => {
     let mounted = true;
-    getDomainRecommendations(projectId)
-      .then((results) => {
-        if (!mounted) return;
-        setRecommendation(results[0] ?? null);
-      })
-      .catch((err) => {
-        if (mounted) setInitialError(parseApiError(err));
-      })
-      .finally(() => {
-        if (mounted) setLoadingInitial(false);
-      });
+
+    // On the very first mount, load whatever recommendation already
+    // exists. On any later change of triggerKey (a domain search just
+    // regenerated the list this recommendation was based on), drop the
+    // stale pick instead of re-fetching — it no longer matches what's
+    // on screen, and the founder should press the button to re-run it.
+    if (isFirstRun.current) {
+      isFirstRun.current = false;
+      setLoadingInitial(true);
+      getDomainRecommendations(projectId)
+        .then((results) => {
+          if (!mounted) return;
+          setRecommendation(results[0] ?? null);
+        })
+        .catch((err) => {
+          if (mounted) setInitialError(parseApiError(err));
+        })
+        .finally(() => {
+          if (mounted) setLoadingInitial(false);
+        });
+    } else {
+      setRecommendation(null);
+      recommendTask.cancel();
+    }
+
     return () => {
       mounted = false;
-      recommendTask.cancel();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, triggerKey]);
 
   useEffect(() => {
     if (recommendTask.state === "SUCCESS" && recommendTask.result) {
@@ -59,10 +79,10 @@ export default function DomainRecommendationPanel({ projectId }) {
   const isLoading = recommendTask.state === "LOADING";
 
   return (
-    <div className="px-6 py-5">
+    <div className="rounded-sm border-2 border-wire/40 bg-elevated p-3">
       <div className="flex items-center justify-between">
-        <p className="font-display text-sm font-bold uppercase tracking-wide">
-          <span className="text-ink/30">03</span> AI Recommendation
+        <p className="font-mono text-[10px] uppercase tracking-widest text-wire">
+          ✦ AI Recommendation
         </p>
         {recommendation && <StampBadge status="done" label="Stamped" />}
       </div>
@@ -72,7 +92,7 @@ export default function DomainRecommendationPanel({ projectId }) {
       )}
 
       {recommendation && (
-        <div className="mt-2 rounded-sm border border-hairline p-3">
+        <div className="mt-2">
           <p className="font-mono text-lg font-medium tracking-tight">
             {recommendation.recommended_domain.domain}
           </p>
