@@ -104,6 +104,13 @@ class DomainRecommendationSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class TogglePrivacySerializer(serializers.Serializer):
+    """
+    Validates the request body for POST /domains/{id}/toggle-privacy/
+    """
+    enabled = serializers.BooleanField(required=True)
+
+
 class DomainClaimSerializer(serializers.ModelSerializer):
     """
     Read shape for GET /domains/{id}/claims/ — same shape convention as

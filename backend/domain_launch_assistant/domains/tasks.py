@@ -309,3 +309,65 @@ def simulate_registration_task(task_id: str, domain_result_id: str) -> None:
     # so no serializer round-trip needed here (unlike the tasks above).
     task.result = result
     task.save(update_fields=["status", "result"])
+
+
+@shared_task
+def toggle_domain_privacy_task(task_id: str, domain_result_id: str, enabled: bool) -> None:
+    """
+    Background counterpart of DomainPrivacyToggleView. domain_result_id
+    points at an already-persisted DomainResult — presumed already
+    registered in the sandbox via simulate_registration_task. Toggling
+    privacy on a domain never sandbox-registered will fail with a 404
+    from name.com itself (per their docs: domains must be created in
+    sandbox before use), surfaced here the same way as any other
+    provider error. Nothing is persisted beyond TaskRecord: same
+    discipline as simulate_registration_task — no new model, no
+    LaunchProject.status change.
+    """
+    task = TaskRecord.objects.get(task_id=task_id)
+    task.status = TaskRecord.Status.PROCESSING
+    task.save(update_fields=["status"])
+
+    domain_result = DomainResult.objects.get(id=domain_result_id)
+    try:
+        result = DomainRegistrationSimulationService().toggle_privacy(
+            domain_result.domain, enabled
+        )
+    except DomainRegistrationSimulationGuardError as exc:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = str(exc)
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DomainRegistrationSimulationTimeoutError:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_TIMEOUT"
+        task.error_message = "The domain provider did not respond. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DomainRegistrationSimulationProviderError:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_ERROR"
+        task.error_message = "Sandbox privacy toggle is temporarily unavailable."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DomainRegistrationSimulationError as exc:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_ERROR"
+        task.error_message = str(exc)
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except Exception:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = "Something went wrong. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        logger.exception(
+            "Unhandled error in toggle_domain_privacy_task",
+            extra={"task_id": task_id, "domain_result_id": domain_result_id},
+        )
+        return
+
+    task.status = TaskRecord.Status.SUCCESS
+    task.result = result
+    task.save(update_fields=["status", "result"])

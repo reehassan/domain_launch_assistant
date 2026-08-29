@@ -5,6 +5,7 @@ from django.urls import path
 from domain_launch_assistant.domains.views import (
     DomainClaimListView,
     DomainClaimsCheckView,
+    DomainPrivacyToggleView,
     DomainRecommendGenerateView,
     DomainRecommendationListView,
     DomainRegistrationSimulateView,
@@ -60,5 +61,10 @@ urlpatterns = [
         "domains/<uuid:domain_id>/simulate-registration/",
         DomainRegistrationSimulateView.as_view(),
         name="domain-registration-simulate",
+    ),
+    path(
+        "domains/<uuid:domain_id>/toggle-privacy/",
+        DomainPrivacyToggleView.as_view(),
+        name="domain-privacy-toggle",
     ),
 ]

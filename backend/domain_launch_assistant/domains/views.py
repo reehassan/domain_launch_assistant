@@ -34,6 +34,7 @@ from domain_launch_assistant.domains.serializers import (
     DomainSearchRequestSerializer,
     DomainSearchSerializer,
     SelectDomainSerializer,
+    TogglePrivacySerializer,
 )
 from domain_launch_assistant.domains.services.domain_search import (
     DomainSearchError,
@@ -47,6 +48,7 @@ from domain_launch_assistant.domains.tasks import (
     check_domains_task,
     recommend_domain_task,
     simulate_registration_task,
+    toggle_domain_privacy_task,
 )
 from domain_launch_assistant.launches.models import LaunchProject
 from domain_launch_assistant.tasks.models import TaskRecord
@@ -449,6 +451,67 @@ class DomainRegistrationSimulateView(APIView):
 
         simulate_registration_task.delay(str(task_id), str(domain_result.id))
 
+        return Response(
+            {
+                "domain_id": str(domain_result.id),
+                "status": "PROCESSING",
+                "task_id": str(task_id),
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class DomainPrivacyToggleView(APIView):
+    """
+    Toggles WHOIS privacy for a domain in the name.com sandbox, as a
+    background task. Ownership enforced via domain_result.project.user,
+    same pattern as DomainRegistrationSimulateView — this endpoint also
+    hangs off /domains/{id}/, not /projects/{id}/....
+
+    Gated the same way as Simulate Registration
+    (LaunchProject.status == READY): toggling privacy on a domain that
+    was never registered in the sandbox would just 404 from name.com
+    itself, so this reuses the existing readiness gate rather than
+    inventing a new precondition.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, domain_id):
+        domain_result = get_object_or_404(
+            DomainResult,
+            id=domain_id,
+            project__user=request.user,
+        )
+        if domain_result.project.status != LaunchProject.Status.READY:
+            return api_error(
+                code="CONFLICT",
+                message="Toggling WHOIS privacy is only available once the project is READY.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+        serializer = TogglePrivacySerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_error(
+                code="VALIDATION_ERROR",
+                message="The request contains invalid data.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                details=serializer.errors,
+            )
+        if TaskRecord.has_active_task(domain_result.project):
+            return api_error(
+                code="CONFLICT",
+                message="A task is already in progress for this project. Please wait for it to finish.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+        task_id = uuid.uuid4()
+        TaskRecord.objects.create(
+            task_id=task_id,
+            project=domain_result.project,
+            status=TaskRecord.Status.PENDING,
+        )
+        toggle_domain_privacy_task.delay(
+            str(task_id), str(domain_result.id), serializer.validated_data["enabled"]
+        )
         return Response(
             {
                 "domain_id": str(domain_result.id),
