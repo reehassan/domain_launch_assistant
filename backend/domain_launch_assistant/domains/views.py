@@ -154,6 +154,30 @@ class DomainResultListView(APIView):
     Corresponds to api-contract.md section 17.
 
     Query params: ?available=true|false, ?extension=.com, ?search=ledger
+
+    Scoped to the project's latest COMPLETED DomainSearch only (audit
+    fix — Ticket 1). Previously this queried DomainResult by `project`
+    across every DomainSearch ever run for it, so regenerating a
+    search (same brand_idea_id/extensions, a new DomainSearch row)
+    left every prior search's results still showing up here alongside
+    the new ones. DomainStep.jsx masks this within a single session by
+    swapping its local state to just the new search's task result, but
+    a page reload re-fetches this endpoint directly and the stale
+    duplicates reappeared.
+    
+    Deliberately a read-side fix rather than deleting old
+    DomainSearch/DomainResult rows on regenerate: DomainCheck,
+    DomainClaim, and DomainRecommendation all point at DomainResult
+    with on_delete=PROTECT, so deleting a prior search whose domains
+    had already been checked/claimed/recommended would raise
+    ProtectedError and crash the regenerate action outright. This way
+    nothing is ever deleted — old rows stay in the DB, still directly
+    reachable by ID (existing checks/claims/recommendations keep
+    working) — they just stop appearing in *this* list once a newer
+    search completes. If no DomainSearch has completed yet for the
+    project, this correctly returns an empty result set rather than
+    falling back to an in-progress/failed search's (nonexistent)
+    results.
     """
 
     permission_classes = [IsAuthenticated]
@@ -165,7 +189,19 @@ class DomainResultListView(APIView):
             user=request.user,
         )
 
-        results = DomainResult.objects.filter(project=project)
+        latest_search = (
+            DomainSearch.objects.filter(
+                project=project,
+                status=DomainSearch.Status.COMPLETED,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        if latest_search is None:
+            results = DomainResult.objects.none()
+        else:
+            results = DomainResult.objects.filter(search=latest_search)
 
         available_param = request.query_params.get("available")
         if available_param is not None:
