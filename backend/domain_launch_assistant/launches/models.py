@@ -19,7 +19,7 @@ class LaunchProject(models.Model):
         CONFIGURING_DNS = "CONFIGURING_DNS", "Configuring DNS"
         VERIFYING_DNS = "VERIFYING_DNS", "Verifying DNS"
         READY = "READY", "Ready"
-        FAILED = "failed", "Failed"
+        FAILED = "FAILED", "Failed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
