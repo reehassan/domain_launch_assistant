@@ -104,7 +104,7 @@ class BrandIdeaListView(APIView):
             many=True,
         )
 
-        return Response(serializer.data)
+        return Response({"results": serializer.data})
 
 
 class BrandIdeaSelectView(APIView):
