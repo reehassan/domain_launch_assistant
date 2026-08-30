@@ -59,6 +59,7 @@ class CheckDomainView(APIView):
             )
 
         check_types = serializer.validated_data["check_types"]
+        expected_value = serializer.validated_data.get("expected_value")
 
         try:
             CheckDomainService.validate_check_types(check_types)
@@ -80,6 +81,7 @@ class CheckDomainView(APIView):
             project=project,
             domain_result=domain_result,
             check_types=check_types,
+            expected_value=expected_value,
         )
 
         task_id = uuid.uuid4()
