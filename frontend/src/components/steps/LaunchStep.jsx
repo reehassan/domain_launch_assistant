@@ -1,23 +1,19 @@
 // frontend/src/components/steps/LaunchStep.jsx
 //
 // Step 04/05 of the launch flow. DomainCheckoutPanel handles
-// registration (Feature 6); DomainDnsPanel (Feature 7, added here)
-// handles pointing the domain somewhere via name.com's real DNS
-// Records API — the fourth genuinely distinct name.com endpoint family
-// in this app, after availability, claims, and registration.
+// registration (Feature 6); DomainDnsPanel (Feature 7) handles
+// pointing the domain somewhere via name.com's real DNS Records API.
 //
-// `registered` is local, same-session state set via
-// DomainCheckoutPanel's onRegistered callback — there's no backend
-// field for "was this domain actually registered" to read instead
-// (registration_simulation.py deliberately persists nothing), so this
-// mirrors the same limitation checkout itself already accepts rather
-// than inventing a new source of truth.
-//
-// Launch Report link: always shown, not just once registered — the
-// report itself is reachable at any project status (see
-// LaunchReportPage.jsx / backend LaunchReportView), so a founder can
-// jump to it to see current progress/blocking issues even before
-// finishing this step.
+// Persistence fix (post-Ticket 15): `registered` used to be pure local
+// state, reset to false on every remount — meaning navigating to the
+// Launch Report page and back (a route change, which unmounts this
+// component) made an already-registered domain look unregistered
+// again. It's now lazily seeded from the persisted
+// project.selected_domain.registered_at field (see domains/tasks.py +
+// DomainResultSerializer) on mount, so a fresh mount correctly reflects
+// reality. The onRegistered callback is kept for the same-session case
+// — clicking "Complete Purchase" right now still reveals DomainDnsPanel
+// immediately, without needing a project refetch.
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import DomainCheckoutPanel from "../DomainCheckoutPanel";
@@ -26,7 +22,9 @@ import PerforatedDivider from "../PerforatedDivider";
 import StampBadge from "../StampBadge";
 export default function LaunchStep({ project }) {
   const { id } = useParams();
-  const [registered, setRegistered] = useState(false);
+  const [registered, setRegistered] = useState(
+    () => Boolean(project.selected_domain?.registered_at)
+  );
   return (
     <div>
       <DomainCheckoutPanel
