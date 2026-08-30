@@ -235,7 +235,7 @@ class TestListBrands:
         response = auth_client_a.get(f"/api/v1/projects/{project_a.id}/brands/")
 
         assert response.status_code == status.HTTP_200_OK
-        names = [b["name"] for b in response.data]
+        names = [b["name"] for b in response.data["results"]]
         assert names == ["Mine"]
 
     def test_list_brands_response_shape_has_no_updated_at(self, auth_client_a, project_a):
@@ -249,8 +249,8 @@ class TestListBrands:
         response = auth_client_a.get(f"/api/v1/projects/{project_a.id}/brands/")
 
         assert response.status_code == status.HTTP_200_OK
-        assert "updated_at" not in response.data[0]
-        assert set(response.data[0].keys()) == {
+        assert "updated_at" not in response.data["results"][0]
+        assert set(response.data["results"][0].keys()) == {
             "id", "project", "name", "description", "is_selected", "created_at",
         }
 
