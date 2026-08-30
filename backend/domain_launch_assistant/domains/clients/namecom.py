@@ -361,6 +361,88 @@ class NameComClient:
 
         return data
 
+    def update_record(
+        self,
+        domain_name: str,
+        record_id: int,
+        host: str,
+        record_type: str,
+        answer: str,
+        ttl: int = 300,
+        priority: int | None = None,
+    ) -> dict:
+        """
+        Calls PUT /domains/{domainName}/records/{id} — name.com's Update
+        Record endpoint (Core API v1; the v4 reference at
+        docs.name.com's DNS page describes the same operation and path
+        shape, consistent with this client's other endpoints already
+        confirmed to carry forward unchanged into Core v1). Per
+        name.com's docs: "UpdateRecord replaces the record with the new
+        record that is passed" — this is a full replace, not a partial
+        patch, so callers must supply the complete desired record
+        (host/type/answer/ttl/priority), same field set as
+        create_record.
+        Returns the raw updated Record dict, same shape as
+        create_record's return value.
+        Raises NameComTimeoutError / NameComAPIError on any provider
+        failure, same discipline as the other methods on this client.
+        Timeouts and 5xx are retried with backoff before raising (see
+        _request_with_retry); a 4xx raises immediately.
+        """
+        url = f"{self.base_url}/domains/{domain_name}/records/{record_id}"
+        payload = {
+            "host": host,
+            "type": record_type,
+            "answer": answer,
+            "ttl": ttl,
+        }
+        if priority is not None:
+            payload["priority"] = priority
+        response = self._request_with_retry(
+            "PUT",
+            url,
+            json=payload,
+            auth=(self.username, self.token),
+        )
+        if response.status_code >= 400:
+            raise NameComAPIError(
+                f"name.com returned client error {response.status_code}: {response.text}"
+            )
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise NameComAPIError("name.com returned an unparseable response.") from exc
+        return data
+
+    def delete_record(self, domain_name: str, record_id: int) -> None:
+        """
+        Calls DELETE /domains/{domainName}/records/{id} — name.com's
+        Delete Record endpoint (Core API v1; same v4-to-Core-v1
+        carryover reasoning as update_record above). Per name.com's
+        docs, a successful delete returns an empty response body — this
+        method deliberately does NOT call response.json() on success
+        (unlike every other method on this client), since there is
+        nothing to parse and doing so would raise a spurious
+        NameComAPIError on a call that actually succeeded.
+        Returns None. Raises NameComTimeoutError / NameComAPIError on
+        any provider failure, same discipline as the other methods on
+        this client. Timeouts and 5xx are retried with backoff before
+        raising (see _request_with_retry); a 4xx raises immediately
+        (per name.com's docs, a record id that doesn't exist in the
+        specified domain is one such error).
+        """
+        url = f"{self.base_url}/domains/{domain_name}/records/{record_id}"
+        response = self._request_with_retry(
+            "DELETE",
+            url,
+            auth=(self.username, self.token),
+        )
+        if response.status_code >= 400:
+            raise NameComAPIError(
+                f"name.com returned client error {response.status_code}: {response.text}"
+            )
+        return None
+
     def update_domain_privacy(self, domain_name: str, enabled: bool) -> dict:
         """
         Calls PATCH /domains/{domainName} — name.com's Update a Domain
