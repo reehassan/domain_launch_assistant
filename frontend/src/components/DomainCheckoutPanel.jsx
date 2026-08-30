@@ -18,29 +18,61 @@
 // receipt when checkout succeeds — LaunchStep uses it to know when to
 // reveal DomainDnsPanel. Purely additive: any existing caller that
 // doesn't pass it behaves exactly as before.
-import { useEffect } from "react";
-import { simulateRegistration } from "../api/domains";
+//
+// Ticket 15 — WHOIS privacy toggle. Rendered only once a receipt
+// exists (post-registration), same placement the ticket calls for.
+// Owns a SEPARATE useTaskPolling() instance from checkoutTask, same
+// isolation reasoning as above — toggling privacy shouldn't touch the
+// checkout button's loading state or vice versa. Initial on/off state
+// comes straight off the checkout receipt (simulate_registration's
+// response already includes privacy_enabled at zero extra cost — see
+// registration_simulation.py), then gets overwritten by whatever
+// toggle-privacy/ itself returns after each toggle.
+import { useEffect, useState } from "react";
+import { simulateRegistration, togglePrivacy } from "../api/domains";
 import { useTaskPolling } from "../hooks/useTaskPolling";
 import StampBadge from "./StampBadge";
 import ErrorBanner from "./ErrorBanner";
 
 export default function DomainCheckoutPanel({ domain, onRegistered }) {
   const checkoutTask = useTaskPolling();
+  const privacyTask = useTaskPolling();
+  const [privacyEnabled, setPrivacyEnabled] = useState(null);
 
   async function handleCheckout() {
     await checkoutTask.run(() => simulateRegistration(domain.id));
   }
 
+  async function handleTogglePrivacy() {
+    await privacyTask.run(() => togglePrivacy(domain.id, !privacyEnabled));
+  }
+
   const isLoading = checkoutTask.state === "LOADING";
-  // task.result on SUCCESS: { simulated: true, order_id, message }
+  // task.result on SUCCESS: { simulated: true, order_id, privacy_enabled, message }
   const receipt = checkoutTask.state === "SUCCESS" ? checkoutTask.result : null;
+
+  const isTogglingPrivacy = privacyTask.state === "LOADING";
+  // task.result on SUCCESS: { domain, privacy_enabled, message }
+  const privacyResult = privacyTask.state === "SUCCESS" ? privacyTask.result : null;
 
   useEffect(() => {
     if (receipt && onRegistered) {
       onRegistered(receipt);
     }
+    // Seed the toggle's displayed state from the receipt the first
+    // time checkout succeeds.
+    if (receipt && privacyEnabled === null) {
+      setPrivacyEnabled(receipt.privacy_enabled ?? false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [receipt]);
+
+  useEffect(() => {
+    if (privacyResult) {
+      setPrivacyEnabled(privacyResult.privacy_enabled ?? privacyEnabled);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [privacyResult]);
 
   return (
     <div className="px-6 py-5">
@@ -79,8 +111,34 @@ export default function DomainCheckoutPanel({ domain, onRegistered }) {
         </div>
       )}
 
+      {receipt && privacyEnabled !== null && (
+        <div className="mt-3 flex items-center justify-between rounded-sm border border-hairline p-3">
+          <div>
+            <p className="font-mono text-xs text-ink/60">WHOIS Privacy</p>
+            <p className="mt-0.5 text-xs text-ink/70">
+              {privacyEnabled ? "Enabled — registrant details hidden" : "Disabled — registrant details public"}
+            </p>
+          </div>
+          <button
+            onClick={handleTogglePrivacy}
+            disabled={isTogglingPrivacy}
+            aria-pressed={privacyEnabled}
+            className={`rounded-sm px-3 py-1.5 font-display text-xs font-bold uppercase tracking-wide transition disabled:opacity-50 ${
+              privacyEnabled
+                ? "bg-signal text-white hover:bg-signal/90"
+                : "border border-hairline text-ink/70 hover:bg-hairline/20"
+            }`}
+          >
+            {isTogglingPrivacy ? "Updating…" : privacyEnabled ? "On" : "Off"}
+          </button>
+        </div>
+      )}
+
       {checkoutTask.state === "ERROR" && checkoutTask.error && (
         <ErrorBanner error={checkoutTask.error} />
+      )}
+      {privacyTask.state === "ERROR" && privacyTask.error && (
+        <ErrorBanner error={privacyTask.error} />
       )}
     </div>
   );
