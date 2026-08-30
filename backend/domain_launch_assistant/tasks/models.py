@@ -29,6 +29,19 @@ class TaskRecord(models.Model):
         on_delete=models.CASCADE,
         related_name="tasks",
     )
+    # Optional: which DomainResult this task is about. Only set by
+    # dispatch views whose action is legitimately independent per
+    # domain (currently just claims-check — see
+    # has_active_task_for_domain below). Left null for project-wide
+    # actions (search, recommend), which keep locking against the
+    # whole project via has_active_task, unchanged.
+    domain_result = models.ForeignKey(
+        "domains.DomainResult",
+        on_delete=models.SET_NULL,
+        related_name="tasks",
+        null=True,
+        blank=True,
+    )
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -56,6 +69,34 @@ class TaskRecord(models.Model):
         """
         return cls.objects.filter(
             project=project,
+            status__in=[cls.Status.PENDING, cls.Status.PROCESSING],
+        ).exists()
+
+    @classmethod
+    def has_active_task_for_domain(cls, domain_result) -> bool:
+        """
+        True if this SPECIFIC domain has a TaskRecord still PENDING or
+        PROCESSING. Narrower than has_active_task(project) — used only
+        by actions that don't touch shared project state, so two of
+        them running for two different domains at once is safe.
+
+        Added for the claims-check auto-trigger (DomainClaimsCheck.jsx
+        mounts one instance per AVAILABLE domain card and fires a
+        check immediately, so N domain cards dispatch N checks near-
+        simultaneously): the old project-wide has_active_task() lock
+        let only one of those N checks through, 409ing the rest even
+        though checking domain A's trademark status has nothing to do
+        with checking domain B's. This method fixes that at the root
+        instead of papering over it with frontend throttling.
+
+        Only trusts task rows that were actually tagged with this
+        domain via TaskRecord.domain_result — a task dispatched by a
+        project-wide action (search, recommend) is invisible to this
+        check, by design; those keep serializing via has_active_task
+        instead.
+        """
+        return cls.objects.filter(
+            domain_result=domain_result,
             status__in=[cls.Status.PENDING, cls.Status.PROCESSING],
         ).exists()
 
