@@ -409,7 +409,6 @@ class DomainRecommendationListView(APIView):
         serializer = DomainRecommendationSerializer(recommendations, many=True)
         return Response({"results": serializer.data})
 
-
 class DomainClaimsCheckView(APIView):
     """
     Kicks off an on-demand TMCH trademark-claims check for a single
@@ -417,6 +416,18 @@ class DomainClaimsCheckView(APIView):
     domain_result.project.user, since this endpoint hangs off
     /domains/{id}/, not /projects/{id}/... — same pattern dns/views.py
     already uses for CheckDomainView.
+
+    Concurrency guard is per-domain, not per-project (audit follow-up
+    to Ticket 15): DomainClaimsCheck.jsx auto-fires one check per
+    AVAILABLE domain card the instant it mounts, so a page with N
+    results dispatches N of these near-simultaneously. The old
+    project-wide TaskRecord.has_active_task(project) let only one
+    through and 409'd the rest, even though checking domain A's
+    trademark status doesn't touch domain B's — has_active_task_for_domain
+    only blocks a second check against the SAME domain (e.g. a
+    double-click of "Retry check"), so checks for different domains on
+    the same project now run concurrently instead of racing a shared
+    lock.
     """
 
     permission_classes = [IsAuthenticated]
@@ -428,10 +439,10 @@ class DomainClaimsCheckView(APIView):
             project__user=request.user,
         )
 
-        if TaskRecord.has_active_task(domain_result.project):
+        if TaskRecord.has_active_task_for_domain(domain_result):
             return api_error(
                 code="CONFLICT",
-                message="A task is already in progress for this project. Please wait for it to finish.",
+                message="A trademark claims check is already in progress for this domain. Please wait for it to finish.",
                 status_code=status.HTTP_409_CONFLICT,
             )
 
@@ -439,6 +450,7 @@ class DomainClaimsCheckView(APIView):
         TaskRecord.objects.create(
             task_id=task_id,
             project=domain_result.project,
+            domain_result=domain_result,
             status=TaskRecord.Status.PENDING,
         )
 
@@ -452,7 +464,6 @@ class DomainClaimsCheckView(APIView):
             },
             status=status.HTTP_202_ACCEPTED,
         )
-
 
 class DomainClaimListView(APIView):
     """
