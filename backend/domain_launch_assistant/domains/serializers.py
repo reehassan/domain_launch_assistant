@@ -51,6 +51,9 @@ class DomainResultSerializer(serializers.ModelSerializer):
             "renewal_price",
             "premium",
             "purchase_type",
+            "registered_at",
+            "registration_order_id",
+            "privacy_enabled",
         ]
         read_only_fields = fields
 

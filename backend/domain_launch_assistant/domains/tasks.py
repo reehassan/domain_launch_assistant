@@ -5,6 +5,8 @@ from celery import shared_task
 from django.db import IntegrityError
 from rest_framework.renderers import JSONRenderer
 
+from django.utils import timezone
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -251,8 +253,20 @@ def simulate_registration_task(task_id: str, domain_result_id: str) -> None:
     domain_result_id points at an already-persisted DomainResult.
     DomainRegistrationSimulationService builds its own sandbox-only
     NameComClient internally — never the production client used by the
-    tasks above. Nothing is persisted beyond TaskRecord: no new model,
-    no LaunchProject.status change (data-model.md section 9).
+    tasks above.
+
+    Persistence fix (post-Ticket 15): this used to write nothing beyond
+    TaskRecord, per the original data-model.md section 9 decision — but
+    that meant "was this domain registered" only ever existed as a
+    Celery task result / frontend useState, both of which vanish on
+    reload or navigation even though the sandbox registration itself is
+    durable on name.com's side. On success, this now also stamps
+    registered_at/registration_order_id/privacy_enabled onto the
+    DomainResult itself, so the frontend (and the launch report) can
+    read real persisted state instead of losing it the moment the
+    component that triggered checkout unmounts. LaunchProject.status
+    still does not transition here — that part of the original
+    decision stands.
     """
     task = TaskRecord.objects.get(task_id=task_id)
     task.status = TaskRecord.Status.PROCESSING
@@ -304,12 +318,89 @@ def simulate_registration_task(task_id: str, domain_result_id: str) -> None:
         )
         return
 
+    domain_result.registered_at = timezone.now()
+    domain_result.registration_order_id = result.get("order_id")
+    domain_result.privacy_enabled = result.get("privacy_enabled")
+    domain_result.save(
+        update_fields=["registered_at", "registration_order_id", "privacy_enabled"]
+    )
+
     task.status = TaskRecord.Status.SUCCESS
     # Plain dict of JSON-primitive values (bool/str) — no model involved,
     # so no serializer round-trip needed here (unlike the tasks above).
     task.result = result
     task.save(update_fields=["status", "result"])
 
+
+@shared_task
+def toggle_domain_privacy_task(task_id: str, domain_result_id: str, enabled: bool) -> None:
+    """
+    Background counterpart of DomainPrivacyToggleView. domain_result_id
+    points at an already-persisted DomainResult — presumed already
+    registered in the sandbox via simulate_registration_task. Toggling
+    privacy on a domain never sandbox-registered will fail with a 404
+    from name.com itself (per their docs: domains must be created in
+    sandbox before use), surfaced here the same way as any other
+    provider error.
+
+    Persistence fix (post-Ticket 15): mirrors simulate_registration_task
+    above — on success, the new privacy_enabled value is now also
+    written onto DomainResult.privacy_enabled, not just returned as an
+    unpersisted task result, so the frontend's toggle displays the
+    correct last-known state after a reload/navigation instead of
+    resetting to whatever it was seeded with at the start of the
+    current session.
+    """
+    task = TaskRecord.objects.get(task_id=task_id)
+    task.status = TaskRecord.Status.PROCESSING
+    task.save(update_fields=["status"])
+
+    domain_result = DomainResult.objects.get(id=domain_result_id)
+    try:
+        result = DomainRegistrationSimulationService().toggle_privacy(
+            domain_result.domain, enabled
+        )
+    except DomainRegistrationSimulationGuardError as exc:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = str(exc)
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DomainRegistrationSimulationTimeoutError:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_TIMEOUT"
+        task.error_message = "The domain provider did not respond. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DomainRegistrationSimulationProviderError:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_ERROR"
+        task.error_message = "Sandbox privacy toggle is temporarily unavailable."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DomainRegistrationSimulationError as exc:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_ERROR"
+        task.error_message = str(exc)
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except Exception:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = "Something went wrong. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        logger.exception(
+            "Unhandled error in toggle_domain_privacy_task",
+            extra={"task_id": task_id, "domain_result_id": domain_result_id},
+        )
+        return
+
+    domain_result.privacy_enabled = result.get("privacy_enabled")
+    domain_result.save(update_fields=["privacy_enabled"])
+
+    task.status = TaskRecord.Status.SUCCESS
+    task.result = result
+    task.save(update_fields=["status", "result"])
 
 @shared_task
 def toggle_domain_privacy_task(task_id: str, domain_result_id: str, enabled: bool) -> None:

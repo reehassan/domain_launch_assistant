@@ -115,6 +115,19 @@ class DomainResult(models.Model):
     premium = models.BooleanField(null=True, blank=True)
     purchase_type = models.CharField(max_length=50, null=True, blank=True)
 
+    # --- Sandbox registration state (persistence fix, post-Ticket 15) ---
+    # Previously "was this domain registered in the sandbox" and "is
+    # WHOIS privacy on" only ever existed as an unpersisted Celery task
+    # result / frontend useState — both reset to nothing on any page
+    # reload or route navigation, even though the sandbox registration
+    # itself was real and durable on name.com's side. These three
+    # fields let the frontend (and the launch report) reflect what
+    # actually happened instead of forgetting it the moment the
+    # component owning the local state unmounts.
+    registered_at = models.DateTimeField(null=True, blank=True)
+    registration_order_id = models.CharField(max_length=255, null=True, blank=True)
+    privacy_enabled = models.BooleanField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
