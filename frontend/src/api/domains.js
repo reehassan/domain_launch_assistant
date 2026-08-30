@@ -10,6 +10,8 @@ import client from "./client";
 //   GET  /api/v1/domains/{id}/claims/                                                    -> 200, {results: [DomainClaim]} (newest first)
 //   POST /api/v1/domains/{id}/simulate-registration/                                     -> 202, {domain_id, status: "PROCESSING", task_id}
 //                                                        -> 409 CONFLICT if project.status != READY
+//   POST /api/v1/domains/{id}/toggle-privacy/          body: {enabled}                   -> 202, {domain_id, status: "PROCESSING", task_id}
+//                                                        -> 409 CONFLICT if project.status != READY
 //
 // DomainResult shape:         {id, domain, extension, available, status, provider, checked_at, purchase_price, renewal_price, premium, purchase_type}
 // DomainRecommendation shape: {id, project_id, recommended_domain: DomainResult, reasoning, created_at}
@@ -33,7 +35,12 @@ import client from "./client";
 // simulate-registration/ is ASYNC (Day 3, Feature 5/6) for the same reason:
 // it's a live (sandbox-only) name.com call. Poll GET /tasks/{task_id}/ —
 // on SUCCESS, task.result is a plain dict (no model behind it):
-// { simulated: true, order_id: string, message: string }.
+// { simulated: true, order_id: string, privacy_enabled: bool, message: string }.
+//
+// toggle-privacy/ is ASYNC (Ticket 15) for the same reason: it's a live
+// (sandbox-only) name.com call. Poll GET /tasks/{task_id}/ — on SUCCESS,
+// task.result is a plain dict (no model behind it):
+// { domain: string, privacy_enabled: bool, message: string }.
 const DEFAULT_EXTENSIONS = [".com", ".ai", ".io"];
 export async function startDomainSearch(projectId, brandIdeaId, extensions = DEFAULT_EXTENSIONS) {
   const { data } = await client.post(
@@ -73,5 +80,11 @@ export async function listDomainClaims(domainId) {
 }
 export async function simulateRegistration(domainId) {
   const { data } = await client.post(`domains/${domainId}/simulate-registration/`);
+  return data; // { domain_id, status: "PROCESSING", task_id }
+}
+export async function togglePrivacy(domainId, enabled) {
+  const { data } = await client.post(`domains/${domainId}/toggle-privacy/`, {
+    enabled,
+  });
   return data; // { domain_id, status: "PROCESSING", task_id }
 }
