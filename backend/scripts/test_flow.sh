@@ -19,13 +19,23 @@
 # domain/project ids.
 #
 # Day 3 update: added a project-status check after DNS checks (10b) and
-# a Simulate Registration exercise (15) against Feature 5. NOTE:
-# DNS_RESOLUTION performs a REAL socket.gethostbyname() call, and
-# DOMAIN_ID here is always just an AVAILABLE (never actually registered
-# or DNS-configured) domain — so DNS_RESOLUTION will almost always FAIL,
-# which correctly keeps the project at VERIFYING_DNS rather than READY
-# under the new all-checks-must-PASS rule. Step 15 detects this and
-# explains it rather than treating the resulting 409 as a script bug.
+# a Simulate Registration exercise (15) against Feature 5.
+# [Superseded by the Ticket 13 update below — see there for why
+# DNS_RESOLUTION is no longer part of step 9's default request.]
+#
+# Ticket 13 update: DNS_RESOLUTION used to PASS on any successful public
+# DNS resolution — including for domains this app never touched, which
+# let an unrelated third-party server push a project to READY. It now
+# requires an `expected_value` in the check/ request body and only
+# PASSes if the domain actually resolves to it. Step 9 below matches the
+# product frontend (src/api/dns.js AVAILABLE_CHECK_TYPES) and does NOT
+# request DNS_RESOLUTION for DOMAIN_ID, since DOMAIN_ID is always an
+# AI-generated, never-registered domain that can never legitimately
+# resolve to anything this script controls. Step 10c exercises
+# DNS_RESOLUTION for real, but only if you set
+# DNS_RESOLUTION_TEST_DOMAIN_ID / DNS_RESOLUTION_TEST_EXPECTED_VALUE
+# below to a domain you actually own — otherwise it's skipped with an
+# explanation, not silently assumed to pass.
 #
 # Usage: bash test_flow.sh
 
@@ -38,6 +48,14 @@ PASSWORD="qazqaz786"
 OTHER_USERNAME="ownershiptestuser"
 OTHER_EMAIL="ownershiptest@example.com"
 OTHER_PASSWORD="qazqaz786"
+
+# Optional — set both to exercise the real DNS_RESOLUTION check (step
+# 10c, Ticket 13). Must be a DomainResult id for a domain you actually
+# own and control DNS for, and the IP its A record is genuinely pointed
+# at — DNS_RESOLUTION can never legitimately PASS otherwise. Leave both
+# blank to skip that step.
+DNS_RESOLUTION_TEST_DOMAIN_ID="${DNS_RESOLUTION_TEST_DOMAIN_ID:-}"
+DNS_RESOLUTION_TEST_EXPECTED_VALUE="${DNS_RESOLUTION_TEST_EXPECTED_VALUE:-}"
 
 extract() {
   # extract <json> <key> — pulls a top-level key with python3, prints
@@ -230,12 +248,33 @@ else
 fi
 
 echo
-echo "== 4c. List brands again — count should reflect BOTH batches (old rows not deleted) =="
-curl -s -X GET "$BASE_URL/projects/$PROJECT_ID/brands/" \
-  -H "Authorization: Bearer $TOKEN"
+echo
+echo "== 4c. List brands again — count should reflect ONLY the latest batch =="
+echo "   NOTE: regenerate deletes the prior unselected batch by design"
+echo "   (brand_generation.py) — this is NOT a bug. BRAND_ID is re-extracted"
+echo "   below rather than reused from step 4, since the original row is gone."
+BRANDS_AFTER_REGEN_RESPONSE=$(curl -s -X GET "$BASE_URL/projects/$PROJECT_ID/brands/" \
+  -H "Authorization: Bearer $TOKEN")
+echo "$BRANDS_AFTER_REGEN_RESPONSE"
+
+BRAND_ID=$(python3 -c "
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+    items = data if isinstance(data, list) else data.get('results', [])
+    print(items[0]['id'])
+except Exception:
+    print('')
+" "$BRANDS_AFTER_REGEN_RESPONSE")
+
+if [ -z "$BRAND_ID" ]; then
+  echo "!! No brands returned after regenerate, stopping."
+  exit 1
+fi
+echo "-> BRAND_ID (post-regenerate)=$BRAND_ID"
 
 echo
-echo "== 5. Select brand (using ORIGINAL BRAND_ID from step 4, regardless of regenerate outcome) =="
+echo "== 5. Select brand (using post-regenerate BRAND_ID) =="
 SELECT_BRAND_RESPONSE=$(curl -s -X POST "$BASE_URL/projects/$PROJECT_ID/select-brand/" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
@@ -348,10 +387,14 @@ echo "$SELECT_DOMAIN_RESPONSE"
 
 echo
 echo "== 9. Run domain checks (async — dispatch) =="
+echo "   Requesting only DOMAIN_READINESS, matching the product frontend's"
+echo "   AVAILABLE_CHECK_TYPES (src/api/dns.js). DNS_RESOLUTION is"
+echo "   deliberately NOT requested here — see the Ticket 13 note at the"
+echo "   top of this script, and step 10c below for exercising it for real."
 CHECK_RESPONSE=$(curl -s -X POST "$BASE_URL/domains/$DOMAIN_ID/check/" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"check_types": ["DNS_RESOLUTION", "DOMAIN_READINESS"]}')
+  -d '{"check_types": ["DOMAIN_READINESS"]}')
 echo "$CHECK_RESPONSE"
 
 CHECK_TASK_ID=$(extract "$CHECK_RESPONSE" "task_id")
@@ -384,17 +427,52 @@ echo "$CHECKS_RESPONSE"
 
 echo
 echo "== 10b. Check project status after DNS checks =="
-echo "   NOTE: DNS_RESOLUTION performs a REAL socket.gethostbyname() call."
-echo "   Since DOMAIN_ID is a domain that's merely AVAILABLE (never actually"
-echo "   registered/pointed anywhere), this will almost always FAIL to"
-echo "   resolve — which correctly keeps the project at VERIFYING_DNS,"
-echo "   not READY. That's the all-checks-must-PASS guard working as"
-echo "   designed, not a bug. Step 15 below handles this."
+echo "   Only DOMAIN_READINESS was requested in step 9, so this should"
+echo "   reach READY directly as long as the selected domain is still"
+echo "   the project's selected, available domain — there's no"
+echo "   DNS_RESOLUTION gate blocking it in this default flow anymore."
 PROJECT_STATUS_RESPONSE=$(curl -s -X GET "$BASE_URL/projects/$PROJECT_ID/" \
   -H "Authorization: Bearer $TOKEN")
 echo "$PROJECT_STATUS_RESPONSE"
 PROJECT_STATUS=$(extract "$PROJECT_STATUS_RESPONSE" "status")
 echo "-> PROJECT_STATUS=$PROJECT_STATUS"
+
+echo
+echo "== 10c. Optional: DNS_RESOLUTION regression check (Ticket 13) =="
+if [ -n "$DNS_RESOLUTION_TEST_DOMAIN_ID" ] && [ -n "$DNS_RESOLUTION_TEST_EXPECTED_VALUE" ]; then
+  echo "   Running DNS_RESOLUTION against DNS_RESOLUTION_TEST_DOMAIN_ID,"
+  echo "   expecting it to resolve to DNS_RESOLUTION_TEST_EXPECTED_VALUE."
+  echo "   This must be a DomainResult for a domain you actually own and"
+  echo "   control DNS for — it can never legitimately PASS otherwise."
+  DNS_RES_CHECK_RESPONSE=$(curl -s -X POST "$BASE_URL/domains/$DNS_RESOLUTION_TEST_DOMAIN_ID/check/" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $TOKEN" \
+    -d "{\"check_types\": [\"DNS_RESOLUTION\"], \"expected_value\": \"$DNS_RESOLUTION_TEST_EXPECTED_VALUE\"}")
+  echo "$DNS_RES_CHECK_RESPONSE"
+
+  DNS_RES_TASK_ID=$(extract "$DNS_RES_CHECK_RESPONSE" "task_id")
+  if [ -z "$DNS_RES_TASK_ID" ]; then
+    echo "!! No task_id returned — likely a 400 VALIDATION_ERROR (e.g. bad"
+    echo "   domain id, or missing expected_value). Not fatal to the rest"
+    echo "   of this script; see the response body above for the reason."
+  else
+    echo "-> DNS_RES_TASK_ID=$DNS_RES_TASK_ID"
+    DNS_RES_TASK_RESULT=$(poll_task "$DNS_RES_TASK_ID")
+    if [ $? -ne 0 ]; then
+      echo "!! DNS_RESOLUTION check task did not complete (timeout)."
+    else
+      echo "$DNS_RES_TASK_RESULT"
+    fi
+  fi
+else
+  echo "   Skipped. Set DNS_RESOLUTION_TEST_DOMAIN_ID and"
+  echo "   DNS_RESOLUTION_TEST_EXPECTED_VALUE (env vars, see top of this"
+  echo "   script) to a DomainResult id you own and the IP its A record"
+  echo "   actually points at to exercise this check for real. Without"
+  echo "   them there is no domain this script could legitimately PASS"
+  echo "   DNS_RESOLUTION against — this is a documented gap in automated"
+  echo "   coverage, not a bug."
+fi
 
 echo
 echo "== 11. Request AI domain recommendation (async — dispatch) =="
@@ -561,21 +639,19 @@ fi
 echo
 echo
 echo "== 15. Simulate Registration (Feature 5, sandbox-only) =="
-echo "   Gated on project.status == READY. If step 10b showed anything"
-echo "   other than READY (expected — see note there), this will 409"
-echo "   with CONFLICT. That's the correct, intended behavior for a"
-echo "   domain whose DNS was never actually configured — not a failure"
-echo "   of this script or of Feature 5."
+echo "   Gated on project.status == READY. Since step 9 only requested"
+echo "   DOMAIN_READINESS, PROJECT_STATUS from step 10b should already be"
+echo "   READY at this point, and this call should succeed with 202 — a"
+echo "   409 here would mean the selected domain stopped being available"
+echo "   between selection and now, not an expected DNS gap."
 SIMULATE_RESPONSE=$(post_with_status "$BASE_URL/domains/$DOMAIN_ID/simulate-registration/" "$TOKEN")
 echo "$SIMULATE_RESPONSE"
 
 SIMULATE_HTTP_CODE=$(echo "$SIMULATE_RESPONSE" | head -n1 | grep -oE '[0-9]+')
 if [ "$SIMULATE_HTTP_CODE" = "409" ]; then
-  echo "-> 409 CONFLICT as expected (project not READY — see 10b note above)."
-  echo "   To manually force a READY state for a full simulate-registration"
-  echo "   demo, point DOMAIN_ID's actual DNS A record at any real IP"
-  echo "   before running this script, or run check/ again by hand once"
-  echo "   you've done so."
+  echo "-> 409 CONFLICT — project not READY. Check PROJECT_STATUS from"
+  echo "   step 10b above; with only DOMAIN_READINESS requested in step 9"
+  echo "   this normally shouldn't happen."
 elif [ "$SIMULATE_HTTP_CODE" = "202" ]; then
   SIMULATE_BODY=$(echo "$SIMULATE_RESPONSE" | tail -n +2)
   SIMULATE_TASK_ID=$(extract "$SIMULATE_BODY" "task_id")
