@@ -59,16 +59,27 @@ class CheckDomainService:
         project: LaunchProject,
         domain_result: DomainResult,
         check_types: list[str],
+        expected_value: str | None = None,
     ) -> list[DomainCheck]:
-        return [
-            DomainCheck.objects.create(
+        """
+        Ticket 13: expected_value is stamped onto the DNS_RESOLUTION row
+        at creation time (not looked up later from anywhere) — it's the
+        caller-supplied IP the check will be graded against. Other
+        check types (DOMAIN_READINESS) ignore it; per data-model.md §6
+        DNS-specific fields stay null for non-DNS checks.
+        """
+        checks = []
+        for check_type in check_types:
+            create_kwargs = dict(
                 project=project,
                 domain_result=domain_result,
                 check_type=check_type,
                 status=DomainCheck.Status.PENDING,
             )
-            for check_type in check_types
-        ]
+            if check_type == DomainCheck.CheckType.DNS_RESOLUTION:
+                create_kwargs["expected_value"] = expected_value
+            checks.append(DomainCheck.objects.create(**create_kwargs))
+        return checks
 
     def run_checks(self, checks: list[DomainCheck]) -> list[DomainCheck]:
         results = []
@@ -84,7 +95,18 @@ class CheckDomainService:
         return results
 
     def _run_dns_resolution(self, check: DomainCheck) -> DomainCheck:
+        """
+        Ticket 13: this used to PASS on any successful resolution —
+        "does this hostname resolve to *anything*" — which let an
+        unrelated, unowned third-party server pass the check. It now
+        verifies "does this hostname resolve to what the caller
+        expects", via check.expected_value (set in
+        create_pending_checks() from the request body; the request
+        serializer requires it whenever DNS_RESOLUTION is requested, so
+        it's never empty here in practice).
+        """
         domain_result = check.domain_result
+        expected_ip = check.expected_value
         try:
             resolved_ip = socket.gethostbyname(domain_result.domain)
         except socket.gaierror:
@@ -97,17 +119,21 @@ class CheckDomainService:
         except OSError as exc:
             # The lookup itself couldn't complete — network/resolver
             # issue, not a configuration verdict. ERROR, not FAIL.
-            # This is the one place a "provider failure" can happen in
-            # this service, and it was already handled before Day 6 —
-            # nothing new needed here for the async conversion.
             check.status = DomainCheck.Status.ERROR
             check.message = f"DNS resolution check could not be completed: {exc}"
         else:
-            check.status = DomainCheck.Status.PASS
             check.record_type = "A"
             check.record_name = "@"
             check.actual_value = resolved_ip
-            check.message = "Domain resolves correctly."
+            if resolved_ip == expected_ip:
+                check.status = DomainCheck.Status.PASS
+                check.message = "Domain resolves to the expected IP."
+            else:
+                check.status = DomainCheck.Status.FAIL
+                check.message = (
+                    f"Domain resolves to {resolved_ip}, which does not match "
+                    f"the expected value {expected_ip}."
+                )
 
         check.checked_at = timezone.now()
         check.save(update_fields=[
