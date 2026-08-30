@@ -113,3 +113,15 @@ class DnsRecordCreateRequestSerializer(serializers.Serializer):
                 {"priority": "priority is required for MX and SRV records."}
             )
         return data
+
+class DnsRecordUpdateRequestSerializer(DnsRecordCreateRequestSerializer):
+    """
+    Validates the request body for
+    POST /domains/{id}/dns-records/{record_id}/update/
+    Same field set and MX/SRV priority rule as
+    DnsRecordCreateRequestSerializer — name.com's UpdateRecord is a
+    full replace (see namecom.py's update_record docstring), so the
+    caller must supply the complete desired record, identical to
+    Create.
+    """
+    pass

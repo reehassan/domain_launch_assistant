@@ -13,6 +13,7 @@ from domain_launch_assistant.dns.models import DomainCheck
 from domain_launch_assistant.dns.serializers import (
     CheckDomainRequestSerializer,
     DnsRecordCreateRequestSerializer,
+    DnsRecordUpdateRequestSerializer,
     DomainCheckSerializer,
 )
 from domain_launch_assistant.dns.services.check_domain import (
@@ -26,7 +27,13 @@ from domain_launch_assistant.dns.services.dns_records import (
     DnsRecordsService,
     DnsRecordsTimeoutError,
 )
-from domain_launch_assistant.dns.tasks import create_dns_record_task, run_domain_checks_task
+
+from domain_launch_assistant.dns.tasks import (
+    create_dns_record_task,
+    delete_dns_record_task,
+    run_domain_checks_task,
+    update_dns_record_task,
+)
 from domain_launch_assistant.domains.models import DomainResult
 from domain_launch_assistant.launches.models import LaunchProject
 from domain_launch_assistant.tasks.models import TaskRecord
@@ -242,6 +249,120 @@ class DnsRecordCreateView(APIView):
             str(domain_result.id),
             serializer.validated_data,
         )
+
+        return Response(
+            {
+                "domain_id": str(domain_result.id),
+                "status": "PROCESSING",
+                "task_id": str(task_id),
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+class DnsRecordUpdateView(APIView):
+    """
+    Kicks off DNS record update as a background task — same async
+    pattern as DnsRecordCreateView. name.com's UpdateRecord replaces
+    the whole record, so the request body must supply the complete
+    desired record, not just the changed field(s).
+    Same READY gate as DnsRecordCreateView/DnsRecordListView.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, domain_id, record_id):
+        domain_result = get_object_or_404(
+            DomainResult,
+            id=domain_id,
+            project__user=request.user,
+        )
+
+        if domain_result.project.status != LaunchProject.Status.READY:
+            return api_error(
+                code="CONFLICT",
+                message="DNS record management is only available once the project is READY.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+
+        serializer = DnsRecordUpdateRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return api_error(
+                code="VALIDATION_ERROR",
+                message="The request contains invalid data.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                details=serializer.errors,
+            )
+
+        if TaskRecord.has_active_task(domain_result.project):
+            return api_error(
+                code="CONFLICT",
+                message="A task is already in progress for this project. Please wait for it to finish.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+
+        task_id = uuid.uuid4()
+        TaskRecord.objects.create(
+            task_id=task_id,
+            project=domain_result.project,
+            status=TaskRecord.Status.PENDING,
+        )
+
+        update_dns_record_task.delay(
+            str(task_id),
+            str(domain_result.id),
+            record_id,
+            serializer.validated_data,
+        )
+
+        return Response(
+            {
+                "domain_id": str(domain_result.id),
+                "status": "PROCESSING",
+                "task_id": str(task_id),
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class DnsRecordDeleteView(APIView):
+    """
+    Kicks off DNS record deletion as a background task — same async
+    pattern as DnsRecordCreateView/DnsRecordUpdateView. No request
+    body: record_id in the URL is all name.com's DeleteRecord needs.
+    Same READY gate as the other DNS record endpoints.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, domain_id, record_id):
+        domain_result = get_object_or_404(
+            DomainResult,
+            id=domain_id,
+            project__user=request.user,
+        )
+
+        if domain_result.project.status != LaunchProject.Status.READY:
+            return api_error(
+                code="CONFLICT",
+                message="DNS record management is only available once the project is READY.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+
+        if TaskRecord.has_active_task(domain_result.project):
+            return api_error(
+                code="CONFLICT",
+                message="A task is already in progress for this project. Please wait for it to finish.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+
+        task_id = uuid.uuid4()
+        TaskRecord.objects.create(
+            task_id=task_id,
+            project=domain_result.project,
+            status=TaskRecord.Status.PENDING,
+        )
+
+        delete_dns_record_task.delay(str(task_id), str(domain_result.id), record_id)
 
         return Response(
             {

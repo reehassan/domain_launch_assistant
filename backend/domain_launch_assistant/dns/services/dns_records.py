@@ -136,3 +136,46 @@ class DnsRecordsService:
             raise DnsRecordsTimeoutError(str(exc)) from exc
         except NameComAPIError as exc:
             raise DnsRecordsProviderError(str(exc)) from exc
+
+    def update_record(
+        self,
+        domain_result: DomainResult,
+        record_id: int,
+        host: str,
+        record_type: str,
+        answer: str,
+        ttl: int = 300,
+        priority: int | None = None,
+    ) -> dict:
+        """
+        Raises DnsRecordsTimeoutError / DnsRecordsProviderError on
+        provider failure — the caller (the Celery task) must not treat
+        a failed update as if the old record still stands unmodified,
+        same discipline as create_record.
+        """
+        try:
+            return self.namecom_client.update_record(
+                domain_result.domain,
+                record_id,
+                host=host,
+                record_type=record_type,
+                answer=answer,
+                ttl=ttl,
+                priority=priority,
+            )
+        except NameComTimeoutError as exc:
+            raise DnsRecordsTimeoutError(str(exc)) from exc
+        except NameComAPIError as exc:
+            raise DnsRecordsProviderError(str(exc)) from exc
+
+    def delete_record(self, domain_result: DomainResult, record_id: int) -> None:
+        """
+        Raises DnsRecordsTimeoutError / DnsRecordsProviderError on
+        provider failure, same discipline as create_record/update_record.
+        """
+        try:
+            self.namecom_client.delete_record(domain_result.domain, record_id)
+        except NameComTimeoutError as exc:
+            raise DnsRecordsTimeoutError(str(exc)) from exc
+        except NameComAPIError as exc:
+            raise DnsRecordsProviderError(str(exc)) from exc

@@ -158,3 +158,116 @@ def create_dns_record_task(task_id: str, domain_result_id: str, record_data: dic
     # so no serializer round-trip needed, same as simulate_registration_task.
     task.result = record
     task.save(update_fields=["status", "result"])
+
+@shared_task
+def update_dns_record_task(task_id: str, domain_result_id: str, record_id: int, record_data: dict) -> None:
+    """
+    Background counterpart of DnsRecordUpdateView. Same error-handling
+    shape as create_dns_record_task — see that task's docstring for why
+    nothing beyond TaskRecord is persisted.
+    """
+    task = TaskRecord.objects.get(task_id=task_id)
+    task.status = TaskRecord.Status.PROCESSING
+    task.save(update_fields=["status"])
+    domain_result = DomainResult.objects.get(id=domain_result_id)
+    try:
+        record = DnsRecordsService().update_record(
+            domain_result,
+            record_id,
+            host=record_data["host"],
+            record_type=record_data["type"],
+            answer=record_data["answer"],
+            ttl=record_data["ttl"],
+            priority=record_data.get("priority"),
+        )
+    except DnsRecordsGuardError as exc:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = str(exc)
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DnsRecordsTimeoutError:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_TIMEOUT"
+        task.error_message = "The DNS provider did not respond. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DnsRecordsProviderError:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_ERROR"
+        task.error_message = "DNS record update is temporarily unavailable."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DnsRecordsError as exc:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_ERROR"
+        task.error_message = str(exc)
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except Exception:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = "Something went wrong. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        logger.exception(
+            "Unhandled error in update_dns_record_task",
+            extra={"task_id": task_id, "domain_result_id": domain_result_id, "record_id": record_id},
+        )
+        return
+    task.status = TaskRecord.Status.SUCCESS
+    task.result = record
+    task.save(update_fields=["status", "result"])
+
+
+@shared_task
+def delete_dns_record_task(task_id: str, domain_result_id: str, record_id: int) -> None:
+    """
+    Background counterpart of DnsRecordDeleteView. Same error-handling
+    shape as create_dns_record_task/update_dns_record_task. On success,
+    task.result is a small plain dict (name.com's delete response body
+    is empty, so there's nothing from the provider to echo back) — just
+    enough for the frontend to confirm which record_id was removed.
+    """
+    task = TaskRecord.objects.get(task_id=task_id)
+    task.status = TaskRecord.Status.PROCESSING
+    task.save(update_fields=["status"])
+    domain_result = DomainResult.objects.get(id=domain_result_id)
+    try:
+        DnsRecordsService().delete_record(domain_result, record_id)
+    except DnsRecordsGuardError as exc:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = str(exc)
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DnsRecordsTimeoutError:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_TIMEOUT"
+        task.error_message = "The DNS provider did not respond. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DnsRecordsProviderError:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_ERROR"
+        task.error_message = "DNS record deletion is temporarily unavailable."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except DnsRecordsError as exc:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "EXTERNAL_API_ERROR"
+        task.error_message = str(exc)
+        task.save(update_fields=["status", "error_code", "error_message"])
+        return
+    except Exception:
+        task.status = TaskRecord.Status.FAILURE
+        task.error_code = "INTERNAL_ERROR"
+        task.error_message = "Something went wrong. Please try again."
+        task.save(update_fields=["status", "error_code", "error_message"])
+        logger.exception(
+            "Unhandled error in delete_dns_record_task",
+            extra={"task_id": task_id, "domain_result_id": domain_result_id, "record_id": record_id},
+        )
+        return
+    task.status = TaskRecord.Status.SUCCESS
+    task.result = {"record_id": record_id, "deleted": True}
+    task.save(update_fields=["status", "result"])
