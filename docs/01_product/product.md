@@ -65,7 +65,7 @@ A user can: enter a business idea → get brand suggestions → see real availab
 
 ### Explicitly out of scope
 
-Full website builder or hosting · full domain registrar or real (non-sandbox, billable) registration · general-purpose DNS management platform (only the operations this flow needs) · email hosting · payments/billing beyond the sandbox checkout simulation · team/organization accounts · full brand-identity/logo platform · social-username checking · SEO tooling · production-scale infrastructure (multi-region, k8s, etc.).
+Full website builder or hosting · full domain registrar or real (non-sandbox, billable) registration · a general-purpose DNS management platform for domains outside this app's own sandbox-registration flow (DNS record CRUD is full-featured — arbitrary record types, full create/list/update/delete — but only ever against a domain this app itself sandbox-registered, never an arbitrary external domain) · email hosting · payments/billing beyond the sandbox checkout simulation · team/organization accounts · full brand-identity/logo platform · social-username checking · SEO tooling · production-scale infrastructure (multi-region, k8s, etc.).
 
 **Scope rule:** if a feature doesn't move a founder from idea → brand → available domain → launch-ready domain, it doesn't belong in the MVP. Priority: end-to-end workflow > name.com integration > AI generation > availability/pricing/claims > selection/recommendation > launch/DNS readiness > sandbox registration > polish > anything else.
 
