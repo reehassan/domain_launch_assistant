@@ -78,3 +78,17 @@ export async function createDnsRecord(domainId, { host = "", type, answer, ttl =
   const { data } = await client.post(`domains/${domainId}/create-dns-record/`, body);
   return data; // { domain_id, status: "PROCESSING", task_id }
 }
+
+export async function updateDnsRecord(domainId, recordId, { host = "", type, answer, ttl = 300, priority }) {
+  const body = { host, type, answer, ttl };
+  if (priority !== undefined && priority !== null) {
+    body.priority = priority;
+  }
+  const { data } = await client.post(`domains/${domainId}/dns-records/${recordId}/update/`, body);
+  return data; // { domain_id, status: "PROCESSING", task_id }
+}
+
+export async function deleteDnsRecord(domainId, recordId) {
+  const { data } = await client.post(`domains/${domainId}/dns-records/${recordId}/delete/`);
+  return data; // { domain_id, status: "PROCESSING", task_id }
+}
