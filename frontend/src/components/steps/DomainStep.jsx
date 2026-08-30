@@ -15,6 +15,13 @@
 // claimed", which meant a domain whose check hadn't run yet — or was
 // still in flight — read identically to "confirmed clear", so Select
 // was reachable before any check had actually completed.
+//
+// Extension picker: mirrors VALID_EXTENSIONS in domains/serializers.py
+// (backend supports 8, the old default only ever requested 3 —
+// .com/.ai/.io — so .net/.org/.co/.dev/.app were never offered even
+// though the API already accepted them). selectedExtensions is passed
+// explicitly into startDomainSearch() instead of relying on that
+// module's DEFAULT_EXTENSIONS fallback.
 import { useEffect, useState } from "react";
 import { startDomainSearch, listDomainResults, selectDomain } from "../../api/domains";
 import { parseApiError } from "../../api/client";
@@ -23,6 +30,9 @@ import ErrorBanner from "../ErrorBanner";
 import DomainCard from "../DomainCard";
 import DomainRecommendationPanel from "../DomainRecommendationPanel";
 
+const ALL_EXTENSIONS = [".com", ".ai", ".io", ".net", ".org", ".co", ".dev", ".app"];
+const DEFAULT_SELECTED_EXTENSIONS = [".com", ".ai", ".io"];
+
 export default function DomainStep({ project, onProjectUpdate }) {
   const [domains, setDomains] = useState(null);
   const [loadError, setLoadError] = useState(null);
@@ -30,8 +40,8 @@ export default function DomainStep({ project, onProjectUpdate }) {
   const [actionError, setActionError] = useState(null);
   const [searchVersion, setSearchVersion] = useState(0);
   const [claimStatusByDomainId, setClaimStatusByDomainId] = useState(() => ({}));
+  const [selectedExtensions, setSelectedExtensions] = useState(() => DEFAULT_SELECTED_EXTENSIONS);
   const domainSearchTask = useTaskPolling();
-
   useEffect(() => {
     let mounted = true;
     listDomainResults(project.id)
@@ -43,7 +53,6 @@ export default function DomainStep({ project, onProjectUpdate }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id]);
-
   useEffect(() => {
     if (domainSearchTask.state === "SUCCESS") {
       setDomains(domainSearchTask.result.results);
@@ -51,12 +60,17 @@ export default function DomainStep({ project, onProjectUpdate }) {
       setSearchVersion((v) => v + 1);
     }
   }, [domainSearchTask.state, domainSearchTask.result]);
-
+  function toggleExtension(ext) {
+    setSelectedExtensions((prev) =>
+      prev.includes(ext) ? prev.filter((e) => e !== ext) : [...prev, ext]
+    );
+  }
   async function handleFindDomains() {
     setActionError(null);
-    await domainSearchTask.run(() => startDomainSearch(project.id, project.selected_brand.id));
+    await domainSearchTask.run(() =>
+      startDomainSearch(project.id, project.selected_brand.id, selectedExtensions)
+    );
   }
-
   async function handleSelectDomain(domainId) {
     setActionError(null);
     setSelectingDomainId(domainId);
@@ -69,13 +83,11 @@ export default function DomainStep({ project, onProjectUpdate }) {
       setSelectingDomainId(null);
     }
   }
-
   function handleClaimsChecked(domainId, claimStatus) {
     setClaimStatusByDomainId((prev) => ({ ...prev, [domainId]: claimStatus }));
   }
-
   const showFindDomainsButton = domains !== null && domains.length === 0;
-
+  const findDomainsDisabled = domainSearchTask.state === "LOADING" || selectedExtensions.length === 0;
   return (
     <div>
       <ErrorBanner error={loadError} />
@@ -92,13 +104,37 @@ export default function DomainStep({ project, onProjectUpdate }) {
         <p className="font-mono text-xs text-ink/40">Loading domain results…</p>
       )}
       {showFindDomainsButton && (
-        <button
-          onClick={handleFindDomains}
-          disabled={domainSearchTask.state === "LOADING"}
-          className="rounded-sm bg-signal px-4 py-2 font-display text-xs font-bold uppercase tracking-wide text-white transition hover:bg-signal/90 disabled:opacity-50"
-        >
-          {domainSearchTask.state === "LOADING" ? "Searching…" : "Find Domains"}
-        </button>
+        <>
+          <p className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink/40">
+            Extensions to search
+          </p>
+          <div className="mb-3 flex flex-wrap gap-2">
+            {ALL_EXTENSIONS.map((ext) => {
+              const active = selectedExtensions.includes(ext);
+              return (
+                <button
+                  key={ext}
+                  type="button"
+                  onClick={() => toggleExtension(ext)}
+                  className={`rounded-sm border-2 px-2 py-1 font-mono text-xs uppercase tracking-wide transition ${
+                    active
+                      ? "border-signal bg-signal/10 text-signal"
+                      : "border-ink/20 text-ink/40 hover:text-ink"
+                  }`}
+                >
+                  {ext}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            onClick={handleFindDomains}
+            disabled={findDomainsDisabled}
+            className="rounded-sm bg-signal px-4 py-2 font-display text-xs font-bold uppercase tracking-wide text-white transition hover:bg-signal/90 disabled:opacity-50"
+          >
+            {domainSearchTask.state === "LOADING" ? "Searching…" : "Find Domains"}
+          </button>
+        </>
       )}
       {domains && domains.length > 0 && !project.selected_domain && (
         <>
@@ -119,7 +155,7 @@ export default function DomainStep({ project, onProjectUpdate }) {
           </div>
           <button
             onClick={handleFindDomains}
-            disabled={domainSearchTask.state === "LOADING"}
+            disabled={findDomainsDisabled}
             className="mt-3 font-mono text-xs uppercase tracking-wider text-ink/40 underline decoration-dotted hover:text-ink disabled:opacity-50"
           >
             {domainSearchTask.state === "LOADING" ? "Regenerating…" : "Not loving these? Regenerate"}
