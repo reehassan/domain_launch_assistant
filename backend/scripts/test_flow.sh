@@ -580,8 +580,32 @@ curl -s -X GET "$BASE_URL/domains/$DOMAIN_ID/claims/" \
 
 echo
 echo
-echo "== 13. Get launch report (KNOWN NOT IMPLEMENTED — expect 404, see docs/02_architecture/api-contract.md) =="
-get_with_status "$BASE_URL/projects/$PROJECT_ID/launch-report/" "$TOKEN"
+echo "== 13. Get launch report (Ticket: aggregation endpoint, api-contract.md §26) =="
+LAUNCH_REPORT_RAW=$(curl -s -w "\n%{http_code}" -X GET "$BASE_URL/projects/$PROJECT_ID/launch-report/" \
+  -H "Authorization: Bearer $TOKEN")
+LAUNCH_REPORT_CODE=$(echo "$LAUNCH_REPORT_RAW" | tail -n1)
+LAUNCH_REPORT_BODY=$(echo "$LAUNCH_REPORT_RAW" | sed '$d')
+echo "HTTP $LAUNCH_REPORT_CODE"
+echo "$LAUNCH_REPORT_BODY"
+
+if [ "$LAUNCH_REPORT_CODE" != "200" ]; then
+  echo "!! Expected HTTP 200 from launch-report, got $LAUNCH_REPORT_CODE."
+else
+  python3 -c "
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+    required = ['project', 'brand', 'domain', 'claims', 'checks', 'readiness']
+    missing = [k for k in required if k not in data]
+    if missing:
+        print(f'!! launch-report response missing keys: {missing}')
+    else:
+        r = data['readiness']
+        print(f\"-> readiness.ready={r.get('ready')} score={r.get('score')} blocking_issues={len(r.get('blocking_issues', []))}\")
+except Exception as e:
+    print(f'!! Could not parse launch-report response: {e}')
+" "$LAUNCH_REPORT_BODY"
+fi
 
 echo
 echo
