@@ -15,6 +15,16 @@ class TaskRecord(models.Model):
     dispatching view returned. No user FK: ownership is checked via
     project.user, matching brands/domains/dns rather than introducing
     a second, independently-driftable ownership pointer.
+
+    NOTE: project == domain_result.project (when domain_result is set)
+    is an assumed invariant, not enforced via clean() — deliberately.
+    Every call site creates TaskRecord internally from a service, never
+    from user input, so the practical risk is low, and LaunchProject's
+    own clean() (same cross-FK pattern) is already dead code — nothing
+    calls full_clean() anywhere in this app, since views use DRF
+    serializers, not ModelForms. Adding a matching clean() here would
+    be decorative, not real validation. Revisit if/when full_clean()
+    enforcement gets added app-wide.
     """
 
     class Status(models.TextChoices):
