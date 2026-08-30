@@ -39,7 +39,10 @@ class TestCheckDomain:
             mock_lookup.return_value = "203.0.113.10"
             response = auth_client_a.post(
                 f"/api/v1/domains/{domain_result_a.id}/check/",
-                {"check_types": ["DNS_RESOLUTION", "DOMAIN_READINESS"]},
+                {
+                    "check_types": ["DNS_RESOLUTION", "DOMAIN_READINESS"],
+                    "expected_value": "203.0.113.10",
+                },
                 format="json",
             )
 
@@ -78,7 +81,10 @@ class TestCheckDomain:
             mock_lookup.side_effect = socket.gaierror("not found")
             response = auth_client_a.post(
                 f"/api/v1/domains/{domain_result_a.id}/check/",
-                {"check_types": ["DNS_RESOLUTION"]},
+                {
+                    "check_types": ["DNS_RESOLUTION"],
+                    "expected_value": "203.0.113.10",
+                },
                 format="json",
             )
 
@@ -99,7 +105,10 @@ class TestCheckDomain:
             mock_lookup.side_effect = OSError("network unreachable")
             response = auth_client_a.post(
                 f"/api/v1/domains/{domain_result_a.id}/check/",
-                {"check_types": ["DNS_RESOLUTION"]},
+                {
+                    "check_types": ["DNS_RESOLUTION"],
+                    "expected_value": "203.0.113.10",
+                },
                 format="json",
             )
 
@@ -110,6 +119,39 @@ class TestCheckDomain:
         # a task crash — the task itself must still report SUCCESS.
         task = TaskRecord.objects.get(task_id=response.data["task_id"])
         assert task.status == TaskRecord.Status.SUCCESS
+
+    def test_dns_resolution_mismatch_is_fail_not_pass(
+        self, auth_client_a, project_a, domain_result_a
+    ):
+        """
+        Ticket 13's actual enforcement path: the hostname resolves
+        successfully, but to something other than expected_value. This
+        must FAIL, not PASS — "resolves to *anything*" was exactly the
+        false-positive this ticket closed. Previously untested.
+        """
+        with _mock_dns_lookup() as mock_lookup:
+            mock_lookup.return_value = "198.51.100.1"
+            response = auth_client_a.post(
+                f"/api/v1/domains/{domain_result_a.id}/check/",
+                {
+                    "check_types": ["DNS_RESOLUTION"],
+                    "expected_value": "203.0.113.10",
+                },
+                format="json",
+            )
+
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        check = DomainCheck.objects.get(domain_result=domain_result_a)
+        assert check.status == DomainCheck.Status.FAIL
+        assert check.actual_value == "198.51.100.1"
+        assert "does not match" in check.message
+
+        # A resolution mismatch on the only requested check must block
+        # READY, same as any other FAIL — covers the mismatch path
+        # feeding into the same transition rule TestDnsReadyTransition
+        # exercises for gaierror/OSError.
+        project_a.refresh_from_db()
+        assert project_a.status != LaunchProject.Status.READY
 
     def test_domain_readiness_fail_when_not_selected(
         self, auth_client_a, project_a, domain_result_a
@@ -247,7 +289,10 @@ class TestCheckDomain:
 
         response = auth_client_a.post(
             f"/api/v1/domains/{domain_result_a.id}/check/",
-            {"check_types": ["DNS_RESOLUTION"]},
+            {
+                "check_types": ["DNS_RESOLUTION"],
+                "expected_value": "203.0.113.10",
+            },
             format="json",
         )
 
@@ -316,7 +361,10 @@ class TestDnsReadyTransition:
             mock_lookup.return_value = "203.0.113.10"
             response = auth_client_a.post(
                 f"/api/v1/domains/{domain_result_a.id}/check/",
-                {"check_types": ["DNS_RESOLUTION", "DOMAIN_READINESS"]},
+                {
+                    "check_types": ["DNS_RESOLUTION", "DOMAIN_READINESS"],
+                    "expected_value": "203.0.113.10",
+                },
                 format="json",
             )
 
@@ -333,7 +381,10 @@ class TestDnsReadyTransition:
             mock_lookup.return_value = "203.0.113.10"
             response = auth_client_a.post(
                 f"/api/v1/domains/{domain_result_a.id}/check/",
-                {"check_types": ["DNS_RESOLUTION", "DOMAIN_READINESS"]},
+                {
+                    "check_types": ["DNS_RESOLUTION", "DOMAIN_READINESS"],
+                    "expected_value": "203.0.113.10",
+                },
                 format="json",
             )
 
@@ -358,7 +409,10 @@ class TestDnsReadyTransition:
             mock_lookup.side_effect = OSError("network unreachable")
             response = auth_client_a.post(
                 f"/api/v1/domains/{domain_result_a.id}/check/",
-                {"check_types": ["DNS_RESOLUTION", "DOMAIN_READINESS"]},
+                {
+                    "check_types": ["DNS_RESOLUTION", "DOMAIN_READINESS"],
+                    "expected_value": "203.0.113.10",
+                },
                 format="json",
             )
 
@@ -378,3 +432,4 @@ class TestDnsReadyTransition:
         project_a.refresh_from_db()
         assert project_a.status == LaunchProject.Status.VERIFYING_DNS
         assert project_a.status != LaunchProject.Status.READY
+
