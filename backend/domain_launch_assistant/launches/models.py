@@ -106,7 +106,7 @@ class LaunchProject(models.Model):
             )
 
         selected_domain = getattr(self, "selected_domain", None)
-        if selected_domain is not None and selected_domain.search.project_id != self.id:
+        if selected_domain is not None and selected_domain.project_id != self.id:
             raise ValidationError(
                 {"selected_domain": "Selected domain must belong to this project."}
             )
