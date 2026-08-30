@@ -1,8 +1,11 @@
 import axios from "axios";
 
 // ---- Config ----------------------------------------------------------
-const BASE_URL = "http://localhost:8000/api/v1/"; // confirmed via config/urls.py
-
+// Build-time value from Vite's env handling — see frontend/.env.production.
+// Falls back to localhost for local `npm run dev`, where no .env.production
+// is loaded (Vite only applies .env.production during `vite build`/`--mode
+// production`, not `vite dev`).
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1/";
 const ACCESS_KEY = "dla_access";
 const REFRESH_KEY = "dla_refresh";
 
@@ -42,11 +45,9 @@ client.interceptors.request.use((config) => {
 // ---- 401 handling: try one silent refresh, then give up ----------------
 // Prevents parallel requests from all firing their own refresh calls.
 let refreshPromise = null;
-
 async function refreshAccessToken() {
   const refresh = tokenStore.getRefresh();
   if (!refresh) throw new Error("No refresh token available");
-
   if (!refreshPromise) {
     refreshPromise = axios
       .post(`${BASE_URL}auth/token/refresh/`, { refresh })
@@ -65,13 +66,11 @@ client.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-
     // Only attempt refresh once per request, and only on 401s that aren't
     // the login/refresh endpoints themselves (avoid infinite loop).
     const isAuthEndpoint =
       originalRequest.url?.includes("auth/login") ||
       originalRequest.url?.includes("auth/token/refresh");
-
     if (
       error.response?.status === 401 &&
       !originalRequest._retry &&
@@ -87,7 +86,6 @@ client.interceptors.response.use(
         return Promise.reject(refreshError);
       }
     }
-
     return Promise.reject(error);
   }
 );

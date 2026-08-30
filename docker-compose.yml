@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Not published to the host — only other compose services reach this,
+    # per architecture.md §12 ("DB, Redis, and internal app ports stay
+    # private").
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # No volume — Celery broker/result backend only, no persistence
+    # required (architecture.md §9: caching is not implemented).
+
+  api:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # docker-entrypoint.sh (A2) still does its own DB-readiness wait loop
+    # even with this healthcheck gate — that's intentional redundancy, not
+    # a leftover: the entrypoint's own check keeps working if this image
+    # is ever run outside compose (e.g. directly on the Oracle instance
+    # without a compose-level healthcheck), where this depends_on
+    # condition wouldn't exist to protect it.
+
+  worker:
+    build:
+      context: ./backend
+    command: celery -A config worker -l info
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api/v1/
+    # Not published to the host — only nginx proxies to this internally.
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+      - frontend
+
+volumes:
+  postgres_data:
