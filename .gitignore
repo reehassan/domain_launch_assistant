@@ -116,4 +116,4 @@ media/
 
 docs/personal
 
-backend/.env
+backend/.envdocker-compose.override.yml
