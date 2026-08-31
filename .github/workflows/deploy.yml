@@ -62,6 +62,7 @@ jobs:
       NAMECOM_API_TOKEN: ci-placeholder
       NAMECOM_TEST_USERNAME: ci-placeholder
       NAMECOM_TEST_API_TOKEN: ci-placeholder
+      GOOGLE_CLIENT_ID: ci-placeholder
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v8.1.0
