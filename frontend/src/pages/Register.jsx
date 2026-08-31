@@ -5,9 +5,9 @@ import { useAuth } from "../hooks/useAuth";
 import { parseApiError } from "../api/client";
 import ErrorBanner from "../components/ErrorBanner";
 import Logo from "../components/Logo";
+import PasswordInput from "../components/PasswordInput";
 
 const EMPTY_FORM = {
-  username: "",
   email: "",
   password: "",
   first_name: "",
@@ -44,7 +44,11 @@ export default function Register() {
     setError(null);
     setLoading(true);
     try {
-      await register(form);
+      // Backend requires a unique `username`, but this form only collects
+      // an email. Mirror what GoogleAuthView already does for
+      // Google-created accounts (username = email) instead of exposing a
+      // separate username field.
+      await register({ ...form, username: form.email });
       // register() does not return tokens — send the user to /login to
       // actually authenticate, don't pretend they're in.
       navigate("/login", { state: { justRegistered: true } });
@@ -94,34 +98,39 @@ export default function Register() {
 
           <form onSubmit={handleSubmit} className="space-y-3">
             <Field
-              label="Username"
-              value={form.username}
-              onChange={set("username")}
-              required
-              autoFocus
-            />
-            <Field
               label="Email"
               type="email"
               value={form.email}
               onChange={set("email")}
               required
+              autoFocus
+              autoComplete="email"
             />
             <div className="flex gap-2">
               <div className="w-1/2">
-                <Field label="First name" value={form.first_name} onChange={set("first_name")} />
+                <Field
+                  label="First name"
+                  value={form.first_name}
+                  onChange={set("first_name")}
+                  autoComplete="given-name"
+                />
               </div>
               <div className="w-1/2">
-                <Field label="Last name" value={form.last_name} onChange={set("last_name")} />
+                <Field
+                  label="Last name"
+                  value={form.last_name}
+                  onChange={set("last_name")}
+                  autoComplete="family-name"
+                />
               </div>
             </div>
-            <Field
+            <PasswordInput
               label="Password (min 8 chars)"
-              type="password"
               value={form.password}
               onChange={set("password")}
               required
               minLength={8}
+              autoComplete="new-password"
             />
 
             <ErrorBanner error={error} />
@@ -131,8 +140,12 @@ export default function Register() {
               disabled={loading}
               className="w-full rounded-sm bg-signal py-2.5 font-display text-xs font-bold uppercase tracking-wide text-white transition hover:bg-signal/90 disabled:opacity-50"
             >
-              {loading ? "Registering…" : "Register"}
+              {loading ? "Registering…" : "Create account"}
             </button>
+
+            <p className="text-center font-mono text-[10px] text-ink/40">
+              By continuing, you agree to our Terms & Privacy Policy.
+            </p>
           </form>
         </div>
 

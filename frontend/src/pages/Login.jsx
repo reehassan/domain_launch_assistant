@@ -5,6 +5,7 @@ import { useAuth } from "../hooks/useAuth";
 import { parseApiError } from "../api/client";
 import ErrorBanner from "../components/ErrorBanner";
 import Logo from "../components/Logo";
+import PasswordInput from "../components/PasswordInput";
 
 export default function Login() {
   const { login, googleLogin } = useAuth();
@@ -83,20 +84,17 @@ export default function Login() {
                 onChange={(e) => setForm({ ...form, username: e.target.value })}
                 required
                 autoFocus
+                autoComplete="username"
               />
             </div>
-            <div>
-              <label className="mb-1 block font-mono text-[10px] uppercase tracking-widest text-ink/40">
-                Password
-              </label>
-              <input
-                className="w-full rounded-sm border border-hairline bg-paper px-3 py-2 text-sm text-ink placeholder:text-ink/30 outline-none transition focus:border-signal focus:ring-1 focus:ring-signal/30"
-                type="password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                required
-              />
-            </div>
+
+            <PasswordInput
+              label="Password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              required
+              autoComplete="current-password"
+            />
 
             <ErrorBanner error={error} />
 
