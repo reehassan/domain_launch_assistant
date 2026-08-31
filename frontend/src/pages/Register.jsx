@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { GoogleLogin } from "@react-oauth/google";
 import { useAuth } from "../hooks/useAuth";
 import { parseApiError } from "../api/client";
 import ErrorBanner from "../components/ErrorBanner";
@@ -28,7 +29,7 @@ function Field({ label, ...inputProps }) {
 }
 
 export default function Register() {
-  const { register } = useAuth();
+  const { register, googleLogin } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState(EMPTY_FORM);
   const [error, setError] = useState(null);
@@ -54,6 +55,19 @@ export default function Register() {
     }
   }
 
+  async function handleGoogleSuccess(credentialResponse) {
+    setError(null);
+    try {
+      // Google sign-up logs the user in directly (backend creates the
+      // account on the fly) — unlike the form path above, no /login
+      // redirect needed.
+      await googleLogin(credentialResponse.credential);
+      navigate("/dashboard");
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-paper px-4 py-10">
       <div className="w-full max-w-sm">
@@ -65,7 +79,20 @@ export default function Register() {
           <h1 className="font-display text-lg font-bold text-ink">Create an account</h1>
           <p className="mt-1 text-sm text-ink/60">Start filing your first manifest.</p>
 
-          <form onSubmit={handleSubmit} className="mt-5 space-y-3">
+          <div className="mt-5 flex justify-center">
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={() => setError({ message: "Google sign-in failed." })}
+            />
+          </div>
+
+          <div className="my-4 flex items-center gap-3">
+            <div className="h-px flex-1 bg-hairline" />
+            <span className="font-mono text-[10px] uppercase tracking-widest text-ink/40">or</span>
+            <div className="h-px flex-1 bg-hairline" />
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-3">
             <Field
               label="Username"
               value={form.username}

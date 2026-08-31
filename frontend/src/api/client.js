@@ -96,6 +96,7 @@ client.interceptors.response.use(
 // This helper pulls that out safely, with a fallback in case something
 // (e.g. a 500, or a network failure) doesn't go through DRF's handler at
 // all and therefore isn't wrapped.
+
 export function parseApiError(error) {
   const data = error?.response?.data;
   if (data?.error) {
@@ -105,8 +106,13 @@ export function parseApiError(error) {
       details: data.error.details ?? null,
     };
   }
-  // Fallback for anything not wrapped (network errors, 500s without the
-  // custom handler, etc.) — don't let the UI silently show "undefined".
+  if (data?.detail) {
+    return {
+      code: "UNKNOWN_ERROR",
+      message: data.detail,
+      details: null,
+    };
+  }
   return {
     code: "UNKNOWN_ERROR",
     message: error?.message ?? "Something went wrong.",
@@ -123,6 +129,16 @@ export function parseApiError(error) {
 // the same shape UserSerializer/getMe() already return elsewhere.
 export async function login({ username, password }) {
   const { data } = await client.post("auth/login/", { username, password });
+  tokenStore.setTokens({ access: data.access, refresh: data.refresh });
+  return data.user;
+}
+
+
+// Google sign-in doubles as registration server-side (see accounts/views.py
+// GoogleAuthView) — response shape matches login()'s exactly, so it's a
+// drop-in for anything already handling a normal login response.
+export async function googleLogin(credential) {
+  const { data } = await client.post("auth/google/", { credential });
   tokenStore.setTokens({ access: data.access, refresh: data.refresh });
   return data.user;
 }

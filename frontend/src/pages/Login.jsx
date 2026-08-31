@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
+import { GoogleLogin } from "@react-oauth/google";
 import { useAuth } from "../hooks/useAuth";
 import { parseApiError } from "../api/client";
 import ErrorBanner from "../components/ErrorBanner";
 import Logo from "../components/Logo";
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, googleLogin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const justRegistered = Boolean(location.state?.justRegistered);
@@ -29,6 +30,16 @@ export default function Login() {
     }
   }
 
+  async function handleGoogleSuccess(credentialResponse) {
+    setError(null);
+    try {
+      await googleLogin(credentialResponse.credential);
+      navigate("/dashboard");
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-paper px-4">
       <div className="w-full max-w-sm">
@@ -48,7 +59,20 @@ export default function Login() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="mt-5 space-y-3">
+          <div className="mt-5 flex justify-center">
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={() => setError({ message: "Google sign-in failed." })}
+            />
+          </div>
+
+          <div className="my-4 flex items-center gap-3">
+            <div className="h-px flex-1 bg-hairline" />
+            <span className="font-mono text-[10px] uppercase tracking-widest text-ink/40">or</span>
+            <div className="h-px flex-1 bg-hairline" />
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label className="mb-1 block font-mono text-[10px] uppercase tracking-widest text-ink/40">
                 Username

@@ -34,6 +34,12 @@ export function AuthProvider({ children }) {
     return loggedInUser;
   }
 
+  async function doGoogleLogin(credential) {
+    const loggedInUser = await auth.googleLogin(credential);
+    setUser(loggedInUser);
+    return loggedInUser;
+  }
+
   async function doRegister(payload) {
     // register() does NOT log the user in (no tokens in its response) —
     // caller is responsible for redirecting to /login after this resolves.
@@ -46,7 +52,16 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login: doLogin, register: doRegister, logout: doLogout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login: doLogin,
+        googleLogin: doGoogleLogin,
+        register: doRegister,
+        logout: doLogout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

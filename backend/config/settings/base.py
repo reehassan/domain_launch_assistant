@@ -247,3 +247,10 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+
+
+# Google Sign-In
+# The OAuth 2.0 Client ID from Google Cloud Console (Credentials > OAuth
+# client ID > Web application). Used server-side to verify that an ID
+# token presented to auth/google/ was actually issued for *this* app.
+GOOGLE_CLIENT_ID = config("GOOGLE_CLIENT_ID")
