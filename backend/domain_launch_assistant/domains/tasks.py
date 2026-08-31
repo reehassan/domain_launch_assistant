@@ -1,15 +1,11 @@
 # domain_launch_assistant/domains/tasks.py
 import json
+import logging
 
 from celery import shared_task
 from django.db import IntegrityError
-from rest_framework.renderers import JSONRenderer
-
 from django.utils import timezone
-
-import logging
-
-logger = logging.getLogger(__name__)
+from rest_framework.renderers import JSONRenderer
 
 from domain_launch_assistant.core.integrations.gemini.client import GeminiClientError
 from domain_launch_assistant.core.services.domain_recommendation import (
@@ -45,7 +41,7 @@ from domain_launch_assistant.domains.services.registration_simulation import (
 from domain_launch_assistant.launches.models import LaunchProject
 from domain_launch_assistant.tasks.models import TaskRecord
 
-
+logger = logging.getLogger(__name__)
 @shared_task
 def check_domains_task(task_id: str, search_id: str) -> None:
     """
@@ -53,7 +49,6 @@ def check_domains_task(task_id: str, search_id: str) -> None:
     body. search_id points at a DomainSearch row the view already
     created as PENDING — this task runs the provider call and persists
     results, writing outcome to TaskRecord instead of an HTTP response.
-
     Exception order matters: the three specific subclasses must be
     caught before the generic DomainSearchError, same as the original
     view's except-chain.
@@ -61,9 +56,7 @@ def check_domains_task(task_id: str, search_id: str) -> None:
     task = TaskRecord.objects.get(task_id=task_id)
     task.status = TaskRecord.Status.PROCESSING
     task.save(update_fields=["status"])
-
     search = DomainSearch.objects.get(id=search_id)
-
     try:
         DomainSearchService().run_search(search)
     except DomainSearchInputError as exc:
@@ -106,7 +99,6 @@ def check_domains_task(task_id: str, search_id: str) -> None:
             extra={"task_id": task_id, "search_id": search_id},
         )
         return
-
     task.status = TaskRecord.Status.SUCCESS
     # DomainResultSerializer has no PrimaryKeyRelatedField (unlike
     # BrandIdeaSerializer's "project" field in brands/tasks.py), so this
@@ -121,8 +113,6 @@ def check_domains_task(task_id: str, search_id: str) -> None:
         "results": json.loads(rendered),
     }
     task.save(update_fields=["status", "result"])
-
-
 @shared_task
 def check_domain_claims_task(task_id: str, domain_result_id: str) -> None:
     """
@@ -130,7 +120,6 @@ def check_domain_claims_task(task_id: str, domain_result_id: str) -> None:
     points at an already-persisted DomainResult — this task calls
     name.com's TMCH claims endpoint and, only on success, persists a
     DomainClaim row.
-
     On DomainClaimsTimeoutError/DomainClaimsProviderError, nothing is
     written: the task fails with EXTERNAL_API_TIMEOUT / EXTERNAL_API_ERROR
     and the founder sees "check failed", never a false "no claims".
@@ -138,9 +127,7 @@ def check_domain_claims_task(task_id: str, domain_result_id: str) -> None:
     task = TaskRecord.objects.get(task_id=task_id)
     task.status = TaskRecord.Status.PROCESSING
     task.save(update_fields=["status"])
-
     domain_result = DomainResult.objects.get(id=domain_result_id)
-
     try:
         claim = DomainClaimsService().check_claims(domain_result)
     except DomainClaimsTimeoutError:
@@ -180,13 +167,10 @@ def check_domain_claims_task(task_id: str, domain_result_id: str) -> None:
             extra={"task_id": task_id, "domain_result_id": domain_result_id},
         )
         return
-
     task.status = TaskRecord.Status.SUCCESS
     rendered = JSONRenderer().render(DomainClaimSerializer(claim).data)
     task.result = json.loads(rendered)
     task.save(update_fields=["status", "result"])
-
-
 @shared_task
 def recommend_domain_task(task_id: str, project_id: str) -> None:
     """
@@ -195,7 +179,6 @@ def recommend_domain_task(task_id: str, project_id: str) -> None:
     completed domain search and at least one AVAILABLE DomainResult —
     this task calls Gemini via DomainRecommendationService and, only on
     success, persists a DomainRecommendation row.
-
     On DomainRecommendationError (Gemini's pick fails our business
     rules — references a domain that isn't actually available, or
     empty reasoning) or GeminiClientError (the API call/schema
@@ -206,9 +189,7 @@ def recommend_domain_task(task_id: str, project_id: str) -> None:
     task = TaskRecord.objects.get(task_id=task_id)
     task.status = TaskRecord.Status.PROCESSING
     task.save(update_fields=["status"])
-
     project = LaunchProject.objects.get(id=project_id)
-
     try:
         recommendation = DomainRecommendationService().recommend_domain(project)
     except DomainRecommendationError as exc:
@@ -239,13 +220,10 @@ def recommend_domain_task(task_id: str, project_id: str) -> None:
             extra={"task_id": task_id, "project_id": project_id},
         )
         return
-
     task.status = TaskRecord.Status.SUCCESS
     rendered = JSONRenderer().render(DomainRecommendationSerializer(recommendation).data)
     task.result = json.loads(rendered)
     task.save(update_fields=["status", "result"])
-
-
 @shared_task
 def simulate_registration_task(task_id: str, domain_result_id: str) -> None:
     """
@@ -254,7 +232,6 @@ def simulate_registration_task(task_id: str, domain_result_id: str) -> None:
     DomainRegistrationSimulationService builds its own sandbox-only
     NameComClient internally — never the production client used by the
     tasks above.
-
     Persistence fix (post-Ticket 15): this used to write nothing beyond
     TaskRecord, per the original data-model.md section 9 decision — but
     that meant "was this domain registered" only ever existed as a
@@ -271,9 +248,7 @@ def simulate_registration_task(task_id: str, domain_result_id: str) -> None:
     task = TaskRecord.objects.get(task_id=task_id)
     task.status = TaskRecord.Status.PROCESSING
     task.save(update_fields=["status"])
-
     domain_result = DomainResult.objects.get(id=domain_result_id)
-
     try:
         result = DomainRegistrationSimulationService().simulate_registration(domain_result)
     except DomainRegistrationSimulationGuardError as exc:
@@ -317,21 +292,17 @@ def simulate_registration_task(task_id: str, domain_result_id: str) -> None:
             extra={"task_id": task_id, "domain_result_id": domain_result_id},
         )
         return
-
     domain_result.registered_at = timezone.now()
     domain_result.registration_order_id = result.get("order_id")
     domain_result.privacy_enabled = result.get("privacy_enabled")
     domain_result.save(
         update_fields=["registered_at", "registration_order_id", "privacy_enabled"]
     )
-
     task.status = TaskRecord.Status.SUCCESS
     # Plain dict of JSON-primitive values (bool/str) — no model involved,
     # so no serializer round-trip needed here (unlike the tasks above).
     task.result = result
     task.save(update_fields=["status", "result"])
-
-
 @shared_task
 def toggle_domain_privacy_task(task_id: str, domain_result_id: str, enabled: bool) -> None:
     """
@@ -342,7 +313,6 @@ def toggle_domain_privacy_task(task_id: str, domain_result_id: str, enabled: boo
     from name.com itself (per their docs: domains must be created in
     sandbox before use), surfaced here the same way as any other
     provider error.
-
     Persistence fix (post-Ticket 15): mirrors simulate_registration_task
     above — on success, the new privacy_enabled value is now also
     written onto DomainResult.privacy_enabled, not just returned as an
@@ -354,7 +324,6 @@ def toggle_domain_privacy_task(task_id: str, domain_result_id: str, enabled: boo
     task = TaskRecord.objects.get(task_id=task_id)
     task.status = TaskRecord.Status.PROCESSING
     task.save(update_fields=["status"])
-
     domain_result = DomainResult.objects.get(id=domain_result_id)
     try:
         result = DomainRegistrationSimulationService().toggle_privacy(
@@ -394,10 +363,8 @@ def toggle_domain_privacy_task(task_id: str, domain_result_id: str, enabled: boo
             extra={"task_id": task_id, "domain_result_id": domain_result_id},
         )
         return
-
     domain_result.privacy_enabled = result.get("privacy_enabled")
     domain_result.save(update_fields=["privacy_enabled"])
-
     task.status = TaskRecord.Status.SUCCESS
     task.result = result
     task.save(update_fields=["status", "result"])

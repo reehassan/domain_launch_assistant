@@ -2,7 +2,6 @@
 import uuid
 
 # Django
-from django.db import IntegrityError
 from django.shortcuts import get_object_or_404
 
 # Django REST Framework
@@ -11,19 +10,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-# Local Project App Imports
-from domain_launch_assistant.core.integrations.gemini.client import GeminiClientError
 from domain_launch_assistant.brands.models import BrandIdea
 from domain_launch_assistant.brands.serializers import BrandIdeaSerializer
-from domain_launch_assistant.brands.services.brand_generation import (
-    BrandGenerationError,
-    BrandGenerationService,
-)
 from domain_launch_assistant.brands.tasks import generate_brand_ideas_task
+
+# Local Project App Imports
 from domain_launch_assistant.launches.models import LaunchProject
 from domain_launch_assistant.tasks.models import TaskRecord
 from domain_launch_assistant.utils.exceptions import api_error
-
 
 
 class BrandGenerateView(APIView):

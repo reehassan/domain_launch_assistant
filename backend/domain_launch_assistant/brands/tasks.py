@@ -1,30 +1,25 @@
-from django.db import IntegrityError
-
-from celery import shared_task
-from rest_framework.renderers import JSONRenderer
-
 import logging
 
-logger = logging.getLogger(__name__)
+from celery import shared_task
+from django.db import IntegrityError
+from rest_framework.renderers import JSONRenderer
 
-from domain_launch_assistant.core.integrations.gemini.client import GeminiClientError
 from domain_launch_assistant.brands.serializers import BrandIdeaSerializer
 from domain_launch_assistant.brands.services.brand_generation import (
     BrandGenerationError,
     BrandGenerationService,
 )
+from domain_launch_assistant.core.integrations.gemini.client import GeminiClientError
 from domain_launch_assistant.launches.models import LaunchProject
 from domain_launch_assistant.tasks.models import TaskRecord
 
-
+logger = logging.getLogger(__name__)
 @shared_task
 def generate_brand_ideas_task(task_id: str, project_id: str, count: int) -> None:
     task = TaskRecord.objects.get(task_id=task_id)
     task.status = TaskRecord.Status.PROCESSING
     task.save(update_fields=["status"])
-
     project = LaunchProject.objects.get(id=project_id)
-
     try:
         brand_ideas = BrandGenerationService().generate_brand_ideas(
             project=project,
@@ -58,7 +53,6 @@ def generate_brand_ideas_task(task_id: str, project_id: str, count: int) -> None
             extra={"task_id": task_id, "project_id": project_id},
         )
         return
-
     task.status = TaskRecord.Status.SUCCESS
     # .data from a ModelSerializer isn't guaranteed JSON-primitive —
     # PrimaryKeyRelatedField (the "project" field here) returns the raw

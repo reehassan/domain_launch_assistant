@@ -3,7 +3,6 @@
 import uuid
 
 from django.shortcuts import get_object_or_404
-
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -21,13 +20,11 @@ from domain_launch_assistant.dns.services.check_domain import (
     CheckDomainUnsupportedTypeError,
 )
 from domain_launch_assistant.dns.services.dns_records import (
-    DnsRecordsError,
     DnsRecordsGuardError,
     DnsRecordsProviderError,
     DnsRecordsService,
     DnsRecordsTimeoutError,
 )
-
 from domain_launch_assistant.dns.tasks import (
     create_dns_record_task,
     delete_dns_record_task,

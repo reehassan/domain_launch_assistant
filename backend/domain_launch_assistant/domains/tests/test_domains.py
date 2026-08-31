@@ -14,7 +14,6 @@ from domain_launch_assistant.domains.clients.exceptions import (
     NameComAPIError,
     NameComTimeoutError,
 )
-
 from domain_launch_assistant.domains.clients.namecom import NameComClient
 from domain_launch_assistant.domains.models import (
     DomainClaim,
@@ -1012,7 +1011,7 @@ class TestListDomainClaims:
         result = _create_domain_result(
             project_a, search, domain="ledgerflow.ai", available=True
         )
-        older = _create_domain_claim(
+        _create_domain_claim(
             result, has_claims=False, checked_at=timezone.now() - timedelta(minutes=5)
         )
         newer = _create_domain_claim(result, has_claims=False)

@@ -1,9 +1,8 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import mixins, status, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
-from django.shortcuts import get_object_or_404
 
 from domain_launch_assistant.brands.serializers import BrandIdeaSerializer
 from domain_launch_assistant.dns.models import DomainCheck

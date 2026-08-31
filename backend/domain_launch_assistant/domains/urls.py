@@ -6,15 +6,14 @@ from domain_launch_assistant.domains.views import (
     DomainClaimListView,
     DomainClaimsCheckView,
     DomainPrivacyToggleView,
-    DomainRecommendGenerateView,
     DomainRecommendationListView,
+    DomainRecommendGenerateView,
     DomainRegistrationSimulateView,
     DomainResultListView,
     DomainSearchListView,
     DomainSearchStartView,
     DomainSelectView,
 )
-
 
 urlpatterns = [
     path(

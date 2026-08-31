@@ -5,7 +5,6 @@ import uuid
 
 # Django
 from django.conf import settings
-from django.db import IntegrityError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -17,10 +16,6 @@ from rest_framework.views import APIView
 
 # Local Project App Imports
 from domain_launch_assistant.brands.models import BrandIdea
-from domain_launch_assistant.domains.clients.exceptions import (
-    NameComAPIError,
-    NameComTimeoutError,
-)
 from domain_launch_assistant.domains.models import (
     DomainClaim,
     DomainRecommendation,
@@ -37,11 +32,7 @@ from domain_launch_assistant.domains.serializers import (
     TogglePrivacySerializer,
 )
 from domain_launch_assistant.domains.services.domain_search import (
-    DomainSearchError,
-    DomainSearchInputError,
-    DomainSearchProviderError,
     DomainSearchService,
-    DomainSearchTimeoutError,
 )
 from domain_launch_assistant.domains.tasks import (
     check_domain_claims_task,
@@ -53,7 +44,6 @@ from domain_launch_assistant.domains.tasks import (
 from domain_launch_assistant.launches.models import LaunchProject
 from domain_launch_assistant.tasks.models import TaskRecord
 from domain_launch_assistant.utils.exceptions import api_error
-
 
 
 class DomainSearchStartView(APIView):

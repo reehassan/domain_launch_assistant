@@ -1,8 +1,7 @@
-from pydantic import BaseModel
 from django.conf import settings
 from google import genai
-from google.genai import types
-from google.genai import errors
+from google.genai import errors, types
+from pydantic import BaseModel
 
 
 class BrandIdeaOutput(BaseModel):

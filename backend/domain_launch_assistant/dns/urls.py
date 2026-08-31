@@ -1,5 +1,6 @@
 # domain_launch_assistant/dns/urls.py
 from django.urls import path
+
 from domain_launch_assistant.dns.views import (
     CheckDomainView,
     DnsRecordCreateView,
@@ -8,6 +9,7 @@ from domain_launch_assistant.dns.views import (
     DnsRecordUpdateView,
     DomainCheckListView,
 )
+
 urlpatterns = [
     path(
         "domains/<uuid:domain_id>/check/",

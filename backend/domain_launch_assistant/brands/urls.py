@@ -6,7 +6,6 @@ from domain_launch_assistant.brands.views import (
     BrandIdeaSelectView,
 )
 
-
 urlpatterns = [
     path(
         "projects/<uuid:project_id>/generate-brands/",

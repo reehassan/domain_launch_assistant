@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from domain_launch_assistant.brands.models import BrandIdea
 
+
 class BrandIdeaSerializer(serializers.ModelSerializer):
     """
     Serializer for the BrandIdea API representation.

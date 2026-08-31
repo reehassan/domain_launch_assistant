@@ -1,11 +1,126 @@
-name: Deploy to Oracle VPS
+name: CI/CD
 
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
+  lint-backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v8.1.0
+      - run: uv sync --group dev
+      - run: uv run ruff check .
+
+  lint-frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run lint
+
+  test-backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: dla_test
+          POSTGRES_USER: dla_test
+          POSTGRES_PASSWORD: dla_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.test
+      DJANGO_SECRET_KEY: ci-test-secret-key
+      DJANGO_ALLOWED_HOSTS: localhost
+      DATABASE_URL: postgres://dla_test:dla_test@localhost:5432/dla_test
+      REDIS_URL: redis://localhost:6379/0
+      GEMINI_API_KEY: ci-placeholder
+      GEMINI_MODEL: ci-placeholder
+      NAMECOM_USERNAME: ci-placeholder
+      NAMECOM_API_TOKEN: ci-placeholder
+      NAMECOM_TEST_USERNAME: ci-placeholder
+      NAMECOM_TEST_API_TOKEN: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v8.1.0
+      - run: uv sync --group dev
+      - run: uv run pytest
+
+  dependency-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v8.1.0
+      - name: Backend — pip-audit
+        working-directory: backend
+        run: |
+          uv sync --group dev
+          uv run pip-audit
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Frontend — npm audit
+        working-directory: frontend
+        run: |
+          npm ci
+          npm audit --audit-level=high
+
+  image-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t dla-backend:ci ./backend
+      - run: docker build -t dla-frontend:ci ./frontend
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: 'image'
+          image-ref: dla-backend:ci
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: 'image'
+          image-ref: dla-frontend:ci
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   deploy:
+    needs: [lint-backend, lint-frontend, test-backend, dependency-scan, image-scan, secret-scan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH (git pull, rebuild, restart)

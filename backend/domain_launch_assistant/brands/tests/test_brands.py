@@ -5,8 +5,8 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from domain_launch_assistant.core.integrations.gemini.client import GeminiClientError
 from domain_launch_assistant.brands.models import BrandIdea
+from domain_launch_assistant.core.integrations.gemini.client import GeminiClientError
 from domain_launch_assistant.launches.models import LaunchProject
 from domain_launch_assistant.tasks.models import TaskRecord
 

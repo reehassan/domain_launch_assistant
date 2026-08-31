@@ -6,12 +6,12 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from domain_launch_assistant.dns.services.dns_records import DnsRecordsGuardError, DnsRecordsService
 from domain_launch_assistant.domains.clients.exceptions import (
     NameComAPIError,
     NameComTimeoutError,
 )
 from domain_launch_assistant.domains.clients.namecom import NameComClient
-from domain_launch_assistant.dns.services.dns_records import DnsRecordsGuardError, DnsRecordsService
 from domain_launch_assistant.launches.models import LaunchProject
 from domain_launch_assistant.tasks.models import TaskRecord
 
