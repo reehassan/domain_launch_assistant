@@ -1,0 +1,41 @@
+services:
+  api:
+    build:
+      context: ./backend
+      target: builder
+    volumes:
+      - ./backend/domain_launch_assistant:/app/domain_launch_assistant
+      - ./backend/config:/app/config
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.local
+    entrypoint: []
+    command: sh -c "/app/.venv/bin/python manage.py migrate --noinput && /app/.venv/bin/python manage.py runserver 0.0.0.0:8000"
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: ./backend
+      target: builder
+    volumes:
+      - ./backend/domain_launch_assistant:/app/domain_launch_assistant
+      - ./backend/config:/app/config
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.local
+    entrypoint: []
+    command: /app/.venv/bin/celery -A config worker -l info
+
+  frontend:
+    build:
+      context: ./frontend
+      target: build
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+    command: sh -c "npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+
+  nginx:
+    profiles:
+      - proxy
