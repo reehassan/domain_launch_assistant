@@ -141,7 +141,7 @@ jobs:
             docker compose -f docker-compose.yml up -d --build
             echo "Waiting for api container to report healthy internally..."
             for i in $(seq 1 10); do
-              if docker compose -f docker-compose.yml exec -T api curl -fsS http://localhost:8000/health/; then
+              if docker compose -f docker-compose.yml exec -T api python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/')"; then
                 echo "Internal health check passed."
                 exit 0
               fi
