@@ -33,7 +33,7 @@ WORKDIR /app
 # Everything needed to run — the finished venv and the app source — comes
 # from the builder stage. uv itself, uv's download cache, and any
 # intermediate layers from the two `uv sync` steps above are NOT part of
-# this stage and never end up in the final image.
+# this runtime stage and never end up in the final image.
 COPY --from=builder /app /app
 
 ENV PATH="/app/.venv/bin:${PATH}"
@@ -61,6 +61,7 @@ RUN DJANGO_SECRET_KEY=build-time-placeholder \
     NAMECOM_API_TOKEN=build-time-placeholder \
     NAMECOM_TEST_USERNAME=build-time-placeholder \
     NAMECOM_TEST_API_TOKEN=build-time-placeholder \
+    GOOGLE_CLIENT_ID=build-time-placeholder \
     python manage.py collectstatic --noinput
 
 RUN chmod +x docker-entrypoint.sh
