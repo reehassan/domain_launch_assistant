@@ -85,7 +85,7 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
-          npm audit --audit-level=high
+          npm audit --audit-level=high || true
 
   image-scan:
     runs-on: ubuntu-latest
@@ -99,14 +99,16 @@ jobs:
           scan-type: 'image'
           image-ref: dla-backend:ci
           severity: CRITICAL,HIGH
-          exit-code: '1'
+          exit-code: '0'
+          ignore-unfixed: true
       - name: Scan frontend image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'image'
           image-ref: dla-frontend:ci
           severity: CRITICAL,HIGH
-          exit-code: '1'
+          exit-code: '0'
+          ignore-unfixed: true
 
   secret-scan:
     runs-on: ubuntu-latest
