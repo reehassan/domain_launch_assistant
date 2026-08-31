@@ -1,0 +1,45 @@
+name: Deploy to Oracle VPS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH (git pull, rebuild, restart)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd "${{ vars.DEPLOY_PATH }}"
+            git pull origin main
+            docker compose -f docker-compose.yml up -d --build
+            echo "Waiting for api container to report healthy internally..."
+            for i in $(seq 1 10); do
+              if docker compose -f docker-compose.yml exec -T api curl -fsS http://localhost:8000/health/; then
+                echo "Internal health check passed."
+                exit 0
+              fi
+              echo "Not ready yet, retrying in 5s..."
+              sleep 5
+            done
+            echo "Internal health check did not pass after retries."
+            exit 1
+
+      - name: Verify externally (through nginx + TLS)
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS https://dla.areebahassan.xyz/health/; then
+              echo "External health check passed."
+              exit 0
+            fi
+            echo "Not reachable yet, retrying in 5s..."
+            sleep 5
+          done
+          echo "External health check did not pass after retries."
+          exit 1
