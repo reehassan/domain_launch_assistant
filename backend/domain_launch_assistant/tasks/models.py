@@ -1,4 +1,4 @@
-
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from domain_launch_assistant.launches.models import LaunchProject
@@ -16,14 +16,13 @@ class TaskRecord(models.Model):
     a second, independently-driftable ownership pointer.
 
     NOTE: project == domain_result.project (when domain_result is set)
-    is an assumed invariant, not enforced via clean() — deliberately.
-    Every call site creates TaskRecord internally from a service, never
-    from user input, so the practical risk is low, and LaunchProject's
-    own clean() (same cross-FK pattern) is already dead code — nothing
-    calls full_clean() anywhere in this app, since views use DRF
-    serializers, not ModelForms. Adding a matching clean() here would
-    be decorative, not real validation. Revisit if/when full_clean()
-    enforcement gets added app-wide.
+    is an enforced invariant via clean(). Every call site creates
+    TaskRecord internally from a service, never from user input.
+
+    clean() validates that when a domain_result is attached to a task,
+    it belongs to the same LaunchProject stored on the task. This keeps
+    the cross-FK ownership relationship consistent with the rest of
+    the data model.
     """
 
     class Status(models.TextChoices):
@@ -38,6 +37,7 @@ class TaskRecord(models.Model):
         on_delete=models.CASCADE,
         related_name="tasks",
     )
+
     # Optional: which DomainResult this task is about. Only set by
     # dispatch views whose action is legitimately independent per
     # domain (currently just claims-check — see
@@ -51,6 +51,7 @@ class TaskRecord(models.Model):
         null=True,
         blank=True,
     )
+
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -64,6 +65,27 @@ class TaskRecord(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+    def clean(self):
+        """
+        Ensure the TaskRecord and its DomainResult belong to the same
+        LaunchProject.
+
+        A project-wide task can have domain_result=None, so there is
+        nothing to validate in that case.
+        """
+        if (
+            self.domain_result_id is not None
+            and self.domain_result is not None
+            and self.project_id != self.domain_result.project_id
+        ):
+            raise ValidationError(
+                {
+                    "domain_result": (
+                        "domain_result must belong to the same project as project."
+                    )
+                }
+            )
 
     @classmethod
     def has_active_task(cls, project) -> bool:
