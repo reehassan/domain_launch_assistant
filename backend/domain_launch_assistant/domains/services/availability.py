@@ -66,9 +66,12 @@ class AvailabilityService:
             # same checkAvailability response already fetched above — no
             # new provider call. Per name.com's docs, purchaseType is not
             # guaranteed present on every result; when absent we default
-            # to "registration" for available results (their own stated
-            # recommendation), and leave it null for unavailable ones.
-            # ASSUMPTION — not verified against a real sandbox payload.
+            # to "registration" for available results, and leave it null
+            # for unavailable ones.
+            #
+            # Verified against a real name.com sandbox checkAvailability
+            # response on 2026-08-31: an available .com result returned
+            # purchaseType="registration".
             purchase_price = raw.get("purchasePrice")
             renewal_price = raw.get("renewalPrice")
             premium = raw.get("premium")
