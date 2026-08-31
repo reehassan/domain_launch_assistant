@@ -69,7 +69,7 @@ export default function DomainRecommendationPanel({ projectId, triggerKey }) {
     if (recommendTask.state === "SUCCESS" && recommendTask.result) {
       setRecommendation(recommendTask.result);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [recommendTask.state, recommendTask.result]);
 
   async function handleRecommend() {

@@ -132,7 +132,7 @@ export default function DomainDnsPanel({ domain }) {
       </div>
       <p className="mt-1 text-xs text-ink/60">
         Add a DNS record so {domain.domain} points somewhere. Runs against
-        name.com's sandbox — no real DNS is affected.
+        name.com&apos;s sandbox — no real DNS is affected.
       </p>
       {loadError && <ErrorBanner error={loadError} />}
       {records === null && !loadError && (

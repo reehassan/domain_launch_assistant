@@ -118,3 +118,8 @@ docs/personal
 
 backend/.env
 docker-compose.override.yml
+
+# Node
+node_modules/
+dist/
+.env.local
