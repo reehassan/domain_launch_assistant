@@ -85,6 +85,9 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
+          # TODO: react-router-dom v6 has no patched release for GHSA-wrjc-x8rr-h8h6
+          # (fix only in v7.18.0+, a breaking major upgrade). Deferred post-hackathon —
+          # tracked here, not silently suppressed.
           npm audit --audit-level=high || true
 
   image-scan:
