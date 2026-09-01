@@ -5,6 +5,19 @@ import { listProjects } from "../api/projects";
 import { parseApiError } from "../api/client";
 import ErrorBanner from "../components/ErrorBanner";
 import Logo from "../components/Logo";
+import Mascot from "../components/Mascot";
+import StampBadge from "../components/StampBadge";
+
+// Left-edge status strip per project row — lets the whole list be
+// scanned by color without reading each status pill individually.
+const STATUS_STRIP = {
+  READY: "border-l-live",
+  DRAFT: "border-l-hairline",
+};
+
+function statusStripClass(status) {
+  return STATUS_STRIP[status] ?? "border-l-hold";
+}
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -44,13 +57,18 @@ export default function Dashboard() {
         <ErrorBanner error={error} />
 
         {projects === null && !error && (
-          <p className="font-mono text-sm text-ink/40">Loading manifests…</p>
+          <div className="flex items-center gap-2">
+            <StampBadge status="loading" label="Loading manifests" />
+          </div>
         )}
 
         {projects?.length === 0 && (
-          <p className="font-mono text-sm text-ink/40">
-            No manifests filed yet — create your first one.
-          </p>
+          <div className="flex flex-col items-center gap-3 rounded-sm border-2 border-dashed border-hairline py-10 text-center">
+            <Mascot pose="idle" size={56} />
+            <p className="font-mono text-sm text-ink/40">
+              No manifests filed yet — create your first one.
+            </p>
+          </div>
         )}
 
         <ul className="space-y-3">
@@ -58,7 +76,10 @@ export default function Dashboard() {
             <li key={p.id}>
               <Link
                 to={`/projects/${p.id}`}
-                className="flex items-center justify-between rounded-sm border-2 border-hairline bg-surface p-4 transition hover:border-signal/50"
+                className={
+                  "flex items-center justify-between rounded-sm border-2 border-l-4 border-hairline bg-surface p-4 transition hover:border-signal/50 " +
+                  statusStripClass(p.status)
+                }
               >
                 <div className="font-display font-bold text-ink">{p.name}</div>
                 <span className="rounded-sm border border-hairline px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-ink/50">
