@@ -141,6 +141,7 @@ jobs:
             cd "${{ vars.DEPLOY_PATH }}"
             git pull origin main
             docker compose -f docker-compose.yml up -d --build
+            docker compose -f docker-compose.yml restart nginx
             echo "Waiting for api container to report healthy internally..."
             for i in $(seq 1 10); do
               if docker compose -f docker-compose.yml exec -T api python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/')"; then
