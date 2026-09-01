@@ -43,3 +43,14 @@ SECURE_SSL_REDIRECT = True
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
+
+# The internal Docker health check (see CI/CD deploy step) hits
+# http://localhost:8000/health/ directly inside the container — no nginx,
+# no TLS, no X-Forwarded-Proto header. Without this exemption,
+# SECURE_SSL_REDIRECT above redirects that plain-HTTP request to
+# https://localhost:8000/health/, which gunicorn doesn't serve (it only
+# speaks plain HTTP on that port), causing the internal check to fail
+# with an SSL handshake error. Real external traffic to /health/ still
+# goes through nginx+TLS as normal — this only exempts the internal,
+# same-container check.
+SECURE_REDIRECT_EXEMPT = [r"^health/$"]
