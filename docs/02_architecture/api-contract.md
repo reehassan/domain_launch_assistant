@@ -53,6 +53,7 @@ Every endpoint below only calls out errors **beyond** the obvious `401`/`404` an
 |---|---|---|---|
 | `POST` | `/auth/register/` | — | Body: `username, email, password, first_name, last_name`. → `201 {"user": {...}}`. Duplicate username/email → **`400 VALIDATION_ERROR`** (DRF's default `UniqueValidator` — no custom 409 handling). |
 | `POST` | `/auth/login/` | — | Body: `username, password`. → `200 {access, refresh, user}`. `user` is injected by a custom `LoginSerializer` — the frontend uses it directly and does **not** call `/auth/me/` again right after login. |
+| `POST` | `/auth/google/` | — | Body: `{"credential"}` (Google ID token from `@react-oauth/google`). Verifies signature against Google's public certs, then `get_or_create`s a `User` by email — doubles as registration, no separate "register with Google" endpoint. New accounts get `username=email`, `set_unusable_password()` (no password auth possible for Google-only accounts). → `200 {access, refresh, user}`, same shape as `/auth/login/`. Errors: `400` missing `credential` or Google token has no email; `401` invalid/unverifiable credential. |
 | `POST` | `/auth/token/refresh/` | refresh token | → `200 {access}`. Errors: `401 TOKEN_INVALID`/`TOKEN_EXPIRED`. |
 | `POST` | `/auth/logout/` | ✓ | Body: `{refresh}`. Blacklists it. → `204`. |
 | `GET` | `/auth/me/` | ✓ | → `200` user object. Used on app mount to hydrate an existing session from a stored token — this is the one legitimate use of a separate `/me/` call. |
@@ -209,6 +210,7 @@ Every protected endpoint requires `request.user.is_authenticated`, enforced by J
 |---|---|---|
 | `POST` | `/auth/register/` | No |
 | `POST` | `/auth/login/` | No |
+| `POST` | `/auth/google/` | No |
 | `POST` | `/auth/token/refresh/` | No |
 | `POST` | `/auth/logout/` | No |
 | `GET` | `/auth/me/` | No |
