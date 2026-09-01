@@ -1,11 +1,16 @@
 // src/components/LaunchSuccessModal.jsx
-// Shown briefly after a successful login/registration, before redirecting
-// to /dashboard. Reuses the existing stamp-drop keyframe already defined
-// in tailwind.config.js — no new animation needed.
+// Shown briefly after a successful login/registration, or after
+// completing the full launch flow, before redirecting/settling.
+// Reuses the existing stamp-drop keyframe already defined in
+// tailwind.config.js — no new animation needed.
 
 import Mascot from "./Mascot";
 
-export default function LaunchSuccessModal({ show }) {
+export default function LaunchSuccessModal({
+  show,
+  title = "Let's launch your business 🚀",
+  subtitle = "Taking you to your dashboard…",
+}) {
   if (!show) return null;
 
   return (
@@ -14,10 +19,8 @@ export default function LaunchSuccessModal({ show }) {
         <div className="flex justify-center">
           <Mascot pose="celebrating" size={84} />
         </div>
-        <p className="mt-4 font-display text-lg font-bold text-ink">
-          Let&apos;s launch your business 🚀
-        </p>
-        <p className="mt-1 font-mono text-xs text-ink/50">Taking you to your dashboard…</p>
+        <p className="mt-4 font-display text-lg font-bold text-ink">{title}</p>
+        <p className="mt-1 font-mono text-xs text-ink/50">{subtitle}</p>
       </div>
     </div>
   );
