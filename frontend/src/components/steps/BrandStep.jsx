@@ -4,16 +4,9 @@
 // brand list, owns its own generate/regenerate task, and reports
 // upward only when something the shell needs to know about changes
 // (a brand gets selected -> project.selected_brand / status update).
-//
-// `changingBrand`: lets the founder swap their selected brand for a
-// different one when they've navigated back to view this (already
-// "done") step via StepRail. Only offered while !project.selected_domain
-// — once a domain search/selection has happened downstream, changing
-// the brand out from under it would leave stale domain/verify/launch
-// data around with nothing to reconcile it, so re-selection is
-// intentionally locked out past that point (matches BrandIdeaSelectView
-// having no server-side guard against re-selection at all — this is a
-// frontend-only policy, not a backend limitation).
+// This is the fix for the old ProjectDetails.jsx owning ~10 pieces of
+// state for four unrelated steps at once — each step now only knows
+// about itself.
 
 import { useEffect, useState } from "react";
 import { generateBrands, listBrands, selectBrand } from "../../api/brands";
@@ -27,7 +20,6 @@ export default function BrandStep({ project, onProjectUpdate }) {
   const [loadError, setLoadError] = useState(null);
   const [selectingId, setSelectingId] = useState(null);
   const [actionError, setActionError] = useState(null);
-  const [changingBrand, setChangingBrand] = useState(false);
   const brandGenTask = useTaskPolling();
 
   useEffect(() => {
@@ -48,13 +40,6 @@ export default function BrandStep({ project, onProjectUpdate }) {
     }
   }, [brandGenTask.state, brandGenTask.result]);
 
-  // If we navigate away and back with a different project (or the
-  // project's own selection changes under us), don't leave a stale
-  // "changing" UI stuck open.
-  useEffect(() => {
-    setChangingBrand(false);
-  }, [project.id, project.selected_brand?.id]);
-
   async function handleGenerate() {
     setActionError(null);
     await brandGenTask.run(() => generateBrands(project.id));
@@ -65,7 +50,6 @@ export default function BrandStep({ project, onProjectUpdate }) {
     setSelectingId(brandId);
     try {
       const result = await selectBrand(project.id, brandId);
-      setChangingBrand(false);
       onProjectUpdate({ status: result.status, selected_brand: result.selected_brand });
     } catch (err) {
       setActionError(parseApiError(err));
@@ -74,9 +58,6 @@ export default function BrandStep({ project, onProjectUpdate }) {
     }
   }
 
-  const canChangeBrand = Boolean(project.selected_brand) && !project.selected_domain;
-  const showSelectedCard = Boolean(project.selected_brand) && !changingBrand;
-  const showPickGrid = brands && brands.length > 0 && (!project.selected_brand || changingBrand);
   const showGenerateButton = brands !== null && brands.length === 0;
 
   return (
@@ -84,28 +65,16 @@ export default function BrandStep({ project, onProjectUpdate }) {
       <ErrorBanner error={loadError} />
       <ErrorBanner error={actionError || (brandGenTask.state === "ERROR" ? brandGenTask.error : null)} />
 
-      {showSelectedCard && (
+      {project.selected_brand && (
         <div className="rounded-sm border-2 border-live/40 bg-live/5 p-3">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-widest text-live">Selected brand</p>
-              <p className="mt-1 font-display text-xl font-bold">{project.selected_brand.name}</p>
-              {project.selected_brand.description && (
-                <p className="mt-1 text-xs text-ink/60">{project.selected_brand.description}</p>
-              )}
-            </div>
-            {canChangeBrand && (
-              <button
-                type="button"
-                onClick={() => setChangingBrand(true)}
-                className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-ink/40 underline decoration-dotted hover:text-ink"
-              >
-                Change brand
-              </button>
-            )}
-          </div>
+          <p className="font-mono text-[10px] uppercase tracking-widest text-live">Selected brand</p>
+          <p className="mt-1 font-display text-xl font-bold">{project.selected_brand.name}</p>
+          {project.selected_brand.description && (
+            <p className="mt-1 text-xs text-ink/60">{project.selected_brand.description}</p>
+          )}
         </div>
       )}
+
 
       {brands === null && !loadError && (
         <StampBadge status="loading" label="Loading brand ideas" />
@@ -121,17 +90,8 @@ export default function BrandStep({ project, onProjectUpdate }) {
         </button>
       )}
 
-      {showPickGrid && (
+      {brands && brands.length > 0 && !project.selected_brand && (
         <>
-          {changingBrand && (
-            <button
-              type="button"
-              onClick={() => setChangingBrand(false)}
-              className="mb-2 font-mono text-[10px] uppercase tracking-wider text-ink/40 underline decoration-dotted hover:text-ink"
-            >
-              ← Keep current brand
-            </button>
-          )}
           <p className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink/40">
             Pick one to move forward with
           </p>
