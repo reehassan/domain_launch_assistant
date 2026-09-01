@@ -4,7 +4,7 @@ Turn a business idea into a launch-ready domain in one flow: AI brand names → 
 
 Every founder hits the same wall on day one. What do I even call this thing, and can I actually get the domain for it? That question normally sends you bouncing between an AI naming tool, a domain registrar, and a DNS dashboard, three separate tools for one decision. This collapses all of that into a single guided workflow.
 
-**Live demo:** [your-demo-url-here](https://dla.areebahassan.xyz/)
+**Live demo:** [dla.areebahassan.xyz](https://dla.areebahassan.xyz/)
 **Devpost submission:** [your-devpost-link-here](https://devpost.com/software/domain-launch-assistant)
 **Video walkthrough:** [your-youtube-link-here](https://youtube.com/your-link)
 
