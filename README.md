@@ -4,7 +4,7 @@ Turn a business idea into a launch-ready domain in one flow: AI brand names → 
 
 Every founder hits the same wall on day one. What do I even call this thing, and can I actually get the domain for it? That question normally sends you bouncing between an AI naming tool, a domain registrar, and a DNS dashboard, three separate tools for one decision. This collapses all of that into a single guided workflow.
 
-**Live demo:** [your-demo-url-here](https://your-demo-url-here.com)
+**Live demo:** [your-demo-url-here](https://dla.areebahassan.xyz/)
 **Devpost submission:** [your-devpost-link-here](https://devpost.com/software/domain-launch-assistant)
 **Video walkthrough:** [your-youtube-link-here](https://youtube.com/your-link)
 
@@ -83,7 +83,7 @@ Django · Django REST Framework · PostgreSQL · Redis · Celery · React · Tai
 ## Running locally
 
 ```bash
-git clone https://github.com/your-username/domain_launch_assistant.git
+git clone git@github.com:reehassan/domain_launch_assistant.git
 cd domain_launch_assistant
 
 # copy env template and fill in your own keys (Gemini, name.com sandbox, etc.)
