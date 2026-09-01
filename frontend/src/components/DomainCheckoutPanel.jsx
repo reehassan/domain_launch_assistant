@@ -25,22 +25,26 @@
 // already registered (persisted), or b) when a fresh checkout in this
 // session succeeds — LaunchStep uses it to know when to reveal
 // DomainDnsPanel without waiting for a project refetch.
+//
+// onJustRegistered fires ONLY for case (b) above — a genuine
+// registration completing THIS session, not the "already registered on
+// mount" replay. LaunchStep uses this narrower signal to trigger the
+// launch celebration exactly once, instead of re-celebrating every time
+// someone revisits an already-registered project.
 import { useEffect, useState } from "react";
 import { simulateRegistration, togglePrivacy } from "../api/domains";
 import { useTaskPolling } from "../hooks/useTaskPolling";
 import StampBadge from "./StampBadge";
 import ErrorBanner from "./ErrorBanner";
 
-export default function DomainCheckoutPanel({ domain, onRegistered }) {
+export default function DomainCheckoutPanel({ domain, onRegistered, onJustRegistered }) {
   const checkoutTask = useTaskPolling();
   const privacyTask = useTaskPolling();
 
   const alreadyRegistered = Boolean(domain.registered_at);
-
   // task.result on SUCCESS: { simulated: true, order_id, privacy_enabled, message }
   const freshReceipt = checkoutTask.state === "SUCCESS" ? checkoutTask.result : null;
   const isRegistered = alreadyRegistered || Boolean(freshReceipt);
-
   const orderId = freshReceipt?.order_id ?? domain.registration_order_id;
   const receiptMessage =
     freshReceipt?.message ??
@@ -50,7 +54,6 @@ export default function DomainCheckoutPanel({ domain, onRegistered }) {
 
   const [privacyEnabled, setPrivacyEnabled] = useState(domain.privacy_enabled ?? null);
   const privacyDisplay = privacyEnabled ?? false;
-
   const isLoading = checkoutTask.state === "LOADING";
   const isTogglingPrivacy = privacyTask.state === "LOADING";
   const privacyResult = privacyTask.state === "SUCCESS" ? privacyTask.result : null;
@@ -63,8 +66,8 @@ export default function DomainCheckoutPanel({ domain, onRegistered }) {
     await privacyTask.run(() => togglePrivacy(domain.id, !privacyDisplay));
   }
 
-  // Fires once on mount if already-registered (persisted state), and
-  // again whenever a fresh checkout completes this session.
+  // Fires once on mount if already-registered (persisted state) — no
+  // celebration here, this is just "the panel is catching up to reality".
   useEffect(() => {
     if (alreadyRegistered && onRegistered) {
       onRegistered({ order_id: domain.registration_order_id });
@@ -72,9 +75,12 @@ export default function DomainCheckoutPanel({ domain, onRegistered }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fires when a fresh checkout completes THIS session — this is the
+  // genuine "just launched" moment.
   useEffect(() => {
     if (freshReceipt) {
       if (onRegistered) onRegistered(freshReceipt);
+      if (onJustRegistered) onJustRegistered(freshReceipt);
       if (privacyEnabled === null) {
         setPrivacyEnabled(freshReceipt.privacy_enabled ?? false);
       }
@@ -97,7 +103,6 @@ export default function DomainCheckoutPanel({ domain, onRegistered }) {
         </p>
         {isRegistered && <StampBadge status="done" label="Registered" />}
       </div>
-
       <div className="mt-2 rounded-sm border border-hairline p-3">
         <p className="font-mono text-lg font-medium tracking-tight">{domain.domain}</p>
         {domain.purchase_price && (
@@ -107,7 +112,6 @@ export default function DomainCheckoutPanel({ domain, onRegistered }) {
           Sandbox demo — no real charge
         </p>
       </div>
-
       {!isRegistered && (
         <button
           onClick={handleCheckout}
@@ -117,7 +121,6 @@ export default function DomainCheckoutPanel({ domain, onRegistered }) {
           {isLoading ? "Registering…" : "Complete Purchase"}
         </button>
       )}
-
       {isRegistered && orderId && (
         <div className="mt-3 rounded-sm border border-live/40 bg-live/5 p-3">
           <p className="font-mono text-xs text-ink/60">Order ID</p>
@@ -125,7 +128,6 @@ export default function DomainCheckoutPanel({ domain, onRegistered }) {
           {receiptMessage && <p className="mt-2 text-xs text-ink/70">{receiptMessage}</p>}
         </div>
       )}
-
       {isRegistered && (
         <div className="mt-3 flex items-center justify-between rounded-sm border border-hairline p-3">
           <div>
@@ -148,7 +150,6 @@ export default function DomainCheckoutPanel({ domain, onRegistered }) {
           </button>
         </div>
       )}
-
       {checkoutTask.state === "ERROR" && checkoutTask.error && (
         <ErrorBanner error={checkoutTask.error} />
       )}
