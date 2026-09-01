@@ -22,7 +22,6 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY . .
 RUN uv sync --frozen --no-dev
 
-
 FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -35,7 +34,6 @@ WORKDIR /app
 # intermediate layers from the two `uv sync` steps above are NOT part of
 # this runtime stage and never end up in the final image.
 COPY --from=builder /app /app
-
 ENV PATH="/app/.venv/bin:${PATH}"
 
 # This IS meant to persist into the running container — it's not a secret,
@@ -51,6 +49,8 @@ ENV DJANGO_SETTINGS_MODULE=config.settings.production
 # the image's runtime environment or its default config. A container run
 # without every one of these set at runtime WILL fail to boot — that's
 # intentional, not a bug; see config/settings/production.py.
+# CSRF_TRUSTED_ORIGINS needs a scheme (Django rejects bare hostnames for
+# this setting), unlike DJANGO_ALLOWED_HOSTS above it.
 RUN DJANGO_SECRET_KEY=build-time-placeholder \
     DJANGO_ALLOWED_HOSTS=build-time-placeholder \
     DATABASE_URL=postgres://build:build@localhost:5432/build \
@@ -62,6 +62,7 @@ RUN DJANGO_SECRET_KEY=build-time-placeholder \
     NAMECOM_TEST_USERNAME=build-time-placeholder \
     NAMECOM_TEST_API_TOKEN=build-time-placeholder \
     GOOGLE_CLIENT_ID=build-time-placeholder \
+    CSRF_TRUSTED_ORIGINS=http://build-time-placeholder \
     python manage.py collectstatic --noinput
 
 RUN chmod +x docker-entrypoint.sh
@@ -73,6 +74,5 @@ RUN addgroup --system app \
 USER app
 
 EXPOSE 8000
-
 ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
