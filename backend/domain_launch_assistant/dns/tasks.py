@@ -22,6 +22,21 @@ from domain_launch_assistant.tasks.models import TaskRecord
 logger = logging.getLogger(__name__)
 
 
+def _provider_error_message(exc: DnsRecordsProviderError, fallback: str) -> str:
+    """
+    A 4xx from name.com is a real, actionable rejection (bad host/type
+    combination, a conflicting existing record, etc.) — its detail is
+    worth showing the user directly instead of a generic message that
+    implies a transient outage. A 5xx, missing status_code, or missing
+    detail falls back to `fallback`, since those genuinely are
+    "something's wrong on name.com's end, try again" situations rather
+    than something the user did.
+    """
+    if exc.status_code and 400 <= exc.status_code < 500 and exc.detail:
+        return f"name.com rejected this record: {exc.detail}"
+    return fallback
+
+
 @shared_task
 def run_domain_checks_task(task_id: str, check_ids: list[str]) -> None:
     """
@@ -90,6 +105,7 @@ def create_dns_record_task(task_id: str, domain_result_id: str, record_data: dic
     Background counterpart of DnsRecordCreateView. domain_result_id
     points at an already-persisted DomainResult; record_data is the
     already-validated serializer output (host/type/answer/ttl/priority).
+
     DnsRecordsService builds its own sandbox-only NameComClient
     internally — never the production client used by
     AvailabilityService/DomainClaimsService. Nothing is persisted beyond
@@ -102,7 +118,6 @@ def create_dns_record_task(task_id: str, domain_result_id: str, record_data: dic
     task.save(update_fields=["status"])
 
     domain_result = DomainResult.objects.get(id=domain_result_id)
-
     try:
         record = DnsRecordsService().create_record(
             domain_result,
@@ -128,10 +143,12 @@ def create_dns_record_task(task_id: str, domain_result_id: str, record_data: dic
         task.error_message = "The DNS provider did not respond. Please try again."
         task.save(update_fields=["status", "error_code", "error_message"])
         return
-    except DnsRecordsProviderError:
+    except DnsRecordsProviderError as exc:
         task.status = TaskRecord.Status.FAILURE
         task.error_code = "EXTERNAL_API_ERROR"
-        task.error_message = "DNS record creation is temporarily unavailable."
+        task.error_message = _provider_error_message(
+            exc, "DNS record creation is temporarily unavailable."
+        )
         task.save(update_fields=["status", "error_code", "error_message"])
         return
     except DnsRecordsError as exc:
@@ -159,6 +176,7 @@ def create_dns_record_task(task_id: str, domain_result_id: str, record_data: dic
     task.result = record
     task.save(update_fields=["status", "result"])
 
+
 @shared_task
 def update_dns_record_task(task_id: str, domain_result_id: str, record_id: int, record_data: dict) -> None:
     """
@@ -169,6 +187,7 @@ def update_dns_record_task(task_id: str, domain_result_id: str, record_id: int, 
     task = TaskRecord.objects.get(task_id=task_id)
     task.status = TaskRecord.Status.PROCESSING
     task.save(update_fields=["status"])
+
     domain_result = DomainResult.objects.get(id=domain_result_id)
     try:
         record = DnsRecordsService().update_record(
@@ -192,10 +211,12 @@ def update_dns_record_task(task_id: str, domain_result_id: str, record_id: int, 
         task.error_message = "The DNS provider did not respond. Please try again."
         task.save(update_fields=["status", "error_code", "error_message"])
         return
-    except DnsRecordsProviderError:
+    except DnsRecordsProviderError as exc:
         task.status = TaskRecord.Status.FAILURE
         task.error_code = "EXTERNAL_API_ERROR"
-        task.error_message = "DNS record update is temporarily unavailable."
+        task.error_message = _provider_error_message(
+            exc, "DNS record update is temporarily unavailable."
+        )
         task.save(update_fields=["status", "error_code", "error_message"])
         return
     except DnsRecordsError as exc:
@@ -214,6 +235,7 @@ def update_dns_record_task(task_id: str, domain_result_id: str, record_id: int, 
             extra={"task_id": task_id, "domain_result_id": domain_result_id, "record_id": record_id},
         )
         return
+
     task.status = TaskRecord.Status.SUCCESS
     task.result = record
     task.save(update_fields=["status", "result"])
@@ -231,6 +253,7 @@ def delete_dns_record_task(task_id: str, domain_result_id: str, record_id: int) 
     task = TaskRecord.objects.get(task_id=task_id)
     task.status = TaskRecord.Status.PROCESSING
     task.save(update_fields=["status"])
+
     domain_result = DomainResult.objects.get(id=domain_result_id)
     try:
         DnsRecordsService().delete_record(domain_result, record_id)
@@ -246,10 +269,12 @@ def delete_dns_record_task(task_id: str, domain_result_id: str, record_id: int) 
         task.error_message = "The DNS provider did not respond. Please try again."
         task.save(update_fields=["status", "error_code", "error_message"])
         return
-    except DnsRecordsProviderError:
+    except DnsRecordsProviderError as exc:
         task.status = TaskRecord.Status.FAILURE
         task.error_code = "EXTERNAL_API_ERROR"
-        task.error_message = "DNS record deletion is temporarily unavailable."
+        task.error_message = _provider_error_message(
+            exc, "DNS record deletion is temporarily unavailable."
+        )
         task.save(update_fields=["status", "error_code", "error_message"])
         return
     except DnsRecordsError as exc:
@@ -268,6 +293,7 @@ def delete_dns_record_task(task_id: str, domain_result_id: str, record_id: int) 
             extra={"task_id": task_id, "domain_result_id": domain_result_id, "record_id": record_id},
         )
         return
+
     task.status = TaskRecord.Status.SUCCESS
     task.result = {"record_id": record_id, "deleted": True}
     task.save(update_fields=["status", "result"])

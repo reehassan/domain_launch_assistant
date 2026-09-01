@@ -181,10 +181,14 @@ class DnsRecordListView(APIView):
                 message="The DNS provider did not respond. Please try again.",
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             )
-        except DnsRecordsProviderError:
+
+        except DnsRecordsProviderError as exc:
+            message = "DNS record lookup is temporarily unavailable."
+            if exc.status_code and 400 <= exc.status_code < 500 and exc.detail:
+                message = f"name.com rejected this request: {exc.detail}"
             return api_error(
                 code="EXTERNAL_API_ERROR",
-                message="DNS record lookup is temporarily unavailable.",
+                message=message,
                 status_code=status.HTTP_502_BAD_GATEWAY,
             )
 

@@ -99,6 +99,23 @@ class NameComClient:
 
         raise last_exc
 
+    @staticmethod
+    def _error_detail(response) -> str:
+        """
+        Extracts name.com's own error message from a failed response, for
+        surfacing to the user instead of a generic fallback string.
+        name.com's documented error shape is {"message": "..."} — falls
+        back to raw response text (truncated) if that shape isn't present
+        or the body isn't valid JSON.
+        """
+        try:
+            data = response.json()
+            if isinstance(data, dict) and data.get("message"):
+                return str(data["message"])
+        except ValueError:
+            pass
+        return (response.text or f"HTTP {response.status_code}")[:300]
+
     def check_availability(self, domain_names: list[str]) -> list[dict]:
         """
         domain_names: full domain names, e.g. ["ledgerflow.com", "ledgerflow.ai"]
@@ -123,7 +140,9 @@ class NameComClient:
 
         if response.status_code >= 400:
             raise NameComAPIError(
-                f"name.com returned client error {response.status_code}: {response.text}"
+                f"name.com returned client error {response.status_code}: {response.text}",
+                status_code=response.status_code,
+                detail=self._error_detail(response),
             )
 
         try:
@@ -173,7 +192,9 @@ class NameComClient:
 
         if response.status_code >= 400:
             raise NameComAPIError(
-                f"name.com returned client error {response.status_code}: {response.text}"
+                f"name.com returned client error {response.status_code}: {response.text}",
+                status_code=response.status_code,
+                detail=self._error_detail(response),
             )
 
         try:
@@ -254,7 +275,9 @@ class NameComClient:
 
         if response.status_code >= 400:
             raise NameComAPIError(
-                f"name.com returned client error {response.status_code}: {response.text}"
+                f"name.com returned client error {response.status_code}: {response.text}",
+                status_code=response.status_code,
+                detail=self._error_detail(response),
             )
 
         try:
@@ -294,7 +317,9 @@ class NameComClient:
 
         if response.status_code >= 400:
             raise NameComAPIError(
-                f"name.com returned client error {response.status_code}: {response.text}"
+                f"name.com returned client error {response.status_code}: {response.text}",
+                status_code=response.status_code,
+                detail=self._error_detail(response),
             )
 
         try:
@@ -351,7 +376,9 @@ class NameComClient:
 
         if response.status_code >= 400:
             raise NameComAPIError(
-                f"name.com returned client error {response.status_code}: {response.text}"
+                f"name.com returned client error {response.status_code}: {response.text}",
+                status_code=response.status_code,
+                detail=self._error_detail(response),
             )
 
         try:
@@ -406,7 +433,9 @@ class NameComClient:
         )
         if response.status_code >= 400:
             raise NameComAPIError(
-                f"name.com returned client error {response.status_code}: {response.text}"
+                f"name.com returned client error {response.status_code}: {response.text}",
+                status_code=response.status_code,
+                detail=self._error_detail(response),
             )
         try:
             data = response.json()
@@ -439,7 +468,9 @@ class NameComClient:
         )
         if response.status_code >= 400:
             raise NameComAPIError(
-                f"name.com returned client error {response.status_code}: {response.text}"
+                f"name.com returned client error {response.status_code}: {response.text}",
+                status_code=response.status_code,
+                detail=self._error_detail(response),
             )
         return None
 
@@ -477,7 +508,9 @@ class NameComClient:
 
         if response.status_code >= 400:
             raise NameComAPIError(
-                f"name.com returned client error {response.status_code}: {response.text}"
+                f"name.com returned client error {response.status_code}: {response.text}",
+                status_code=response.status_code,
+                detail=self._error_detail(response),
             )
 
         try:

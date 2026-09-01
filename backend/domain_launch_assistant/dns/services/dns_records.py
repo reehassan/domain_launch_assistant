@@ -1,5 +1,4 @@
 # domain_launch_assistant/dns/services/dns_records.py
-
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -23,8 +22,20 @@ class DnsRecordsTimeoutError(DnsRecordsError):
 
 
 class DnsRecordsProviderError(DnsRecordsError):
-    """The provider responded with an error. Maps to EXTERNAL_API_ERROR."""
-    pass
+    """
+    The provider responded with an error. Maps to EXTERNAL_API_ERROR.
+
+    status_code / detail mirror NameComAPIError's fields (see that class'
+    docstring) — carried through here so the Celery task layer can
+    distinguish a real validation rejection (4xx, with a specific reason
+    worth showing the user — e.g. "a CNAME can't coexist with an existing
+    A record on this host") from a genuine provider outage (5xx/timeout,
+    where a generic "temporarily unavailable" message is accurate).
+    """
+    def __init__(self, message: str, status_code: int | None = None, detail: str | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.detail = detail
 
 
 class DnsRecordsGuardError(DnsRecordsError):
@@ -95,6 +106,10 @@ class DnsRecordsService:
             base_url=settings.NAMECOM_TEST_BASE_URL,
         )
 
+    @staticmethod
+    def _wrap(exc: NameComAPIError) -> "DnsRecordsProviderError":
+        return DnsRecordsProviderError(str(exc), status_code=exc.status_code, detail=exc.detail)
+
     def list_records(self, domain_result: DomainResult) -> list[dict]:
         """
         Raises DnsRecordsTimeoutError / DnsRecordsProviderError on
@@ -106,7 +121,7 @@ class DnsRecordsService:
         except NameComTimeoutError as exc:
             raise DnsRecordsTimeoutError(str(exc)) from exc
         except NameComAPIError as exc:
-            raise DnsRecordsProviderError(str(exc)) from exc
+            raise self._wrap(exc) from exc
 
     def create_record(
         self,
@@ -135,7 +150,7 @@ class DnsRecordsService:
         except NameComTimeoutError as exc:
             raise DnsRecordsTimeoutError(str(exc)) from exc
         except NameComAPIError as exc:
-            raise DnsRecordsProviderError(str(exc)) from exc
+            raise self._wrap(exc) from exc
 
     def update_record(
         self,
@@ -166,7 +181,7 @@ class DnsRecordsService:
         except NameComTimeoutError as exc:
             raise DnsRecordsTimeoutError(str(exc)) from exc
         except NameComAPIError as exc:
-            raise DnsRecordsProviderError(str(exc)) from exc
+            raise self._wrap(exc) from exc
 
     def delete_record(self, domain_result: DomainResult, record_id: int) -> None:
         """
@@ -178,4 +193,4 @@ class DnsRecordsService:
         except NameComTimeoutError as exc:
             raise DnsRecordsTimeoutError(str(exc)) from exc
         except NameComAPIError as exc:
-            raise DnsRecordsProviderError(str(exc)) from exc
+            raise self._wrap(exc) from exc
