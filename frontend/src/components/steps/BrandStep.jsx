@@ -13,6 +13,7 @@ import { generateBrands, listBrands, selectBrand } from "../../api/brands";
 import { parseApiError } from "../../api/client";
 import { useTaskPolling } from "../../hooks/useTaskPolling";
 import ErrorBanner from "../ErrorBanner";
+import StampBadge from "../StampBadge";
 
 export default function BrandStep({ project, onProjectUpdate }) {
   const [brands, setBrands] = useState(null);
@@ -74,8 +75,9 @@ export default function BrandStep({ project, onProjectUpdate }) {
         </div>
       )}
 
+
       {brands === null && !loadError && (
-        <p className="font-mono text-xs text-ink/40">Loading brand ideas…</p>
+        <StampBadge status="loading" label="Loading brand ideas" />
       )}
 
       {showGenerateButton && (

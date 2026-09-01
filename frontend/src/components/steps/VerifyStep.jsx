@@ -87,8 +87,11 @@ export default function VerifyStep({ project, onProjectUpdate }) {
         {dnsCheckTask.state === "LOADING" ? "Running…" : "Run Checks"}
       </button>
 
+
       {checks === null && !loadError && (
-        <p className="mt-3 font-mono text-xs text-ink/40">Loading checks…</p>
+        <div className="mt-3">
+          <StampBadge status="loading" label="Loading checks" />
+        </div>
       )}
 
       {checks && checks.length === 0 && (

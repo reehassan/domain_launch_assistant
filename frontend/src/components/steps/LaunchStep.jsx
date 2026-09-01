@@ -14,22 +14,45 @@
 // reality. The onRegistered callback is kept for the same-session case
 // — clicking "Complete Purchase" right now still reveals DomainDnsPanel
 // immediately, without needing a project refetch.
+//
+// Celebration: a genuine "just registered this session" event
+// (onJustRegistered, distinct from onRegistered — see
+// DomainCheckoutPanel's comment) triggers the same mascot + modal
+// moment used on login, so completing the actual six-step flow this
+// app exists for gets the visual payoff it deserves, not just a static
+// StampBadge.
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import DomainCheckoutPanel from "../DomainCheckoutPanel";
 import DomainDnsPanel from "../DomainDnsPanel";
 import PerforatedDivider from "../PerforatedDivider";
 import StampBadge from "../StampBadge";
+import LaunchSuccessModal from "../LaunchSuccessModal";
+
 export default function LaunchStep({ project }) {
   const { id } = useParams();
   const [registered, setRegistered] = useState(
     () => Boolean(project.selected_domain?.registered_at)
   );
+  const [showCelebration, setShowCelebration] = useState(false);
+
+  function handleJustRegistered() {
+    setShowCelebration(true);
+    setTimeout(() => setShowCelebration(false), 2200);
+  }
+
   return (
     <div>
+      <LaunchSuccessModal
+        show={showCelebration}
+        title="Your domain is live 🚀"
+        subtitle="Point it somewhere below to finish launching."
+      />
+
       <DomainCheckoutPanel
         domain={project.selected_domain}
         onRegistered={() => setRegistered(true)}
+        onJustRegistered={handleJustRegistered}
       />
       {registered && (
         <>

@@ -107,9 +107,10 @@ export default function DomainClaimsCheck({ domainId, onChecked }) {
   // IDLE (briefly, before the mount effect fires) or LOADING — the
   // check is automatic now, so this is just a status line, not a
   // call-to-action button anymore.
+
   return (
-    <div className="mt-2">
-      <p className="font-mono text-xs text-ink/40">Checking for trademark claims…</p>
-    </div>
-  );
+  <div className="mt-2">
+    <StampBadge status="loading" label="Checking claims" />
+  </div>
+);
 }

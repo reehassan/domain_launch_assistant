@@ -135,8 +135,11 @@ export default function DomainDnsPanel({ domain }) {
         name.com&apos;s sandbox — no real DNS is affected.
       </p>
       {loadError && <ErrorBanner error={loadError} />}
+
       {records === null && !loadError && (
-        <p className="mt-2 font-mono text-xs text-ink/40">Loading records…</p>
+        <div className="mt-2">
+          <StampBadge status="loading" label="Loading records" />
+        </div>
       )}
       {records && records.length > 0 && (
         <ul className="mt-3 space-y-2">

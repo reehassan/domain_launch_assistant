@@ -29,6 +29,7 @@ import { useTaskPolling } from "../../hooks/useTaskPolling";
 import ErrorBanner from "../ErrorBanner";
 import DomainCard from "../DomainCard";
 import DomainRecommendationPanel from "../DomainRecommendationPanel";
+import StampBadge from "../StampBadge";
 
 const ALL_EXTENSIONS = [".com", ".ai", ".io", ".net", ".org", ".co", ".dev", ".app"];
 const DEFAULT_SELECTED_EXTENSIONS = [".com", ".ai", ".io"];
@@ -101,7 +102,7 @@ export default function DomainStep({ project, onProjectUpdate }) {
         </div>
       )}
       {domains === null && !loadError && (
-        <p className="font-mono text-xs text-ink/40">Loading domain results…</p>
+        <StampBadge status="loading" label="Loading domain results" />
       )}
       {showFindDomainsButton && (
         <>
