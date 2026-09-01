@@ -1,12 +1,20 @@
 // src/components/GoogleAuthButton.jsx
 // Google's own <GoogleLogin> widget can't be restyled to match our
-// palette (it only offers light/dark theme presets). Standard workaround:
-// render the real widget invisibly, and click it programmatically from a
-// button that matches our design system. This keeps the actual ID-token
-// flow Google issues — GoogleAuthView on the backend verifies that token
+// palette (it only offers light/dark theme presets). We render the real
+// widget as a full-size, transparent overlay directly on top of a
+// visually-styled button underneath — the user's tap lands on Google's
+// real button, it's just invisible. This keeps the actual ID-token flow
+// Google issues — GoogleAuthView on the backend verifies that token
 // directly — so nothing about the auth contract changes, only the pixels.
+//
+// IMPORTANT: this used to render the real widget hidden at zero size
+// (h-0 w-0 opacity-0) and proxy taps to it via a JS-triggered .click().
+// That worked on desktop but silently did nothing on mobile — iOS
+// Safari and most mobile browsers only allow the OAuth popup/GSI flow
+// to open from a genuinely trusted, direct user gesture, and a
+// JS-dispatched click on a hidden element doesn't count as one. Do not
+// go back to that pattern.
 
-import { useRef } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 
 function GoogleGlyph() {
@@ -21,23 +29,21 @@ function GoogleGlyph() {
 }
 
 export default function GoogleAuthButton({ onSuccess, onError, label = "Continue with Google" }) {
-  const hiddenRef = useRef(null);
-
-  function handleClick() {
-    hiddenRef.current?.querySelector('div[role="button"]')?.click();
-  }
-
   return (
     <div className="relative">
-      <button
-        type="button"
-        onClick={handleClick}
-        className="flex w-full items-center justify-center gap-2.5 rounded-sm border border-hairline bg-paper px-4 py-2.5 font-display text-xs font-bold uppercase tracking-wide text-ink/70 transition hover:bg-hairline/20"
+      {/* Visual layer only — no onClick. The real click is handled by the
+          transparent GoogleLogin widget stacked on top of it below. */}
+      <div
+        aria-hidden="true"
+        className="flex w-full items-center justify-center gap-2.5 rounded-sm border border-hairline bg-paper px-4 py-2.5 font-display text-xs font-bold uppercase tracking-wide text-ink/70 transition"
       >
         <GoogleGlyph />
         {label}
-      </button>
-      <div ref={hiddenRef} className="pointer-events-none absolute inset-0 h-0 w-0 overflow-hidden opacity-0">
+      </div>
+
+      {/* Real Google widget, full-size and transparent, positioned exactly
+          over the visual button above so the tap is genuinely trusted. */}
+      <div className="absolute inset-0 overflow-hidden opacity-0 [&>div]:h-full [&>div]:w-full [&_iframe]:!h-full [&_iframe]:!w-full">
         <GoogleLogin onSuccess={onSuccess} onError={onError} />
       </div>
     </div>
