@@ -29,3 +29,17 @@ ALLOWED_HOSTS = config(
     "DJANGO_ALLOWED_HOSTS",
     cast=lambda v: [h.strip() for h in v.split(",") if h.strip()],
 )
+# Behind nginx TLS termination — tells Django the original request was
+# HTTPS even though it arrives at gunicorn as plain HTTP from the proxy.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+SECURE_SSL_REDIRECT = True
+
+# HTTP Strict Transport Security — tells browsers to only ever contact this
+# domain over HTTPS for the given duration, even if a user types http://.
+# 1 year is the standard recommended value once you're confident TLS won't
+# need to be temporarily disabled.
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True

@@ -139,6 +139,8 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "domain_launch_assistant.utils.exceptions.custom_exception_handler",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
+    "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.AnonRateThrottle"],
+    "DEFAULT_THROTTLE_RATES": {"anon": "20/min"},
 }
 
 # Simple JWT Settings
@@ -181,11 +183,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
-MAILERS = {
-    "default": {
-        "BACKEND": "django.core.mail.backends.console.EmailBackend",
-    },
-}
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 # Redis (used for caching / Celery broker in later steps)
 
