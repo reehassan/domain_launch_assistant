@@ -52,7 +52,7 @@ async function refreshAccessToken() {
     refreshPromise = axios
       .post(`${BASE_URL}auth/token/refresh/`, { refresh })
       .then(({ data }) => {
-        tokenStore.setTokens({ access: data.access });
+        tokenStore.setTokens({ access: data.access, refresh: data.refresh });
         return data.access;
       })
       .finally(() => {

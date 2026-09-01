@@ -34,10 +34,20 @@ export default {
           "0%, 100%": { transform: "translateY(0)" },
           "50%": { transform: "translateY(-4px)" },
         },
+        "fade-in-up": {
+          "0%": { opacity: "0", transform: "translateY(6px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        "gradient-drift": {
+          "0%, 100%": { backgroundPosition: "0% 50%" },
+          "50%": { backgroundPosition: "100% 50%" },
+        },
       },
       animation: {
         "stamp-drop": "stamp-drop 240ms ease-out",
         "stamp-hover": "stamp-hover 1.4s ease-in-out infinite",
+        "fade-in-up": "fade-in-up 400ms ease-out both",
+        "gradient-drift": "gradient-drift 12s ease-in-out infinite",
       },
     },
   },
