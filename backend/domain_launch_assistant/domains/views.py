@@ -154,7 +154,22 @@ class DomainResultListView(APIView):
     swapping its local state to just the new search's task result, but
     a page reload re-fetches this endpoint directly and the stale
     duplicates reappeared.
-    
+
+    Also scoped to the project's *currently selected brand* (audit fix
+    — change-brand bug): "latest COMPLETED search" used to be found by
+    `project` alone, with no `brand_idea` filter. That meant switching
+    brands via BrandStep's "Change brand" flow — which clears
+    selected_domain but doesn't touch any DomainSearch/DomainResult
+    rows — left this endpoint still returning the *previous* brand's
+    completed results, since a new search for the new brand hadn't run
+    yet. DomainStep would then render that stale grid as if it were
+    live, "Find Domains" would stay hidden (domains.length > 0), and a
+    domain from the old brand's search could be selected against the
+    new brand with nothing catching it (see DomainSelectView below for
+    the matching server-side guard). Now: once selected_brand changes,
+    this correctly returns empty (falls back to the "Find Domains"
+    button) until a search actually completes for the new brand.
+
     Deliberately a read-side fix rather than deleting old
     DomainSearch/DomainResult rows on regenerate: DomainCheck,
     DomainClaim, and DomainRecommendation all point at DomainResult
@@ -165,9 +180,9 @@ class DomainResultListView(APIView):
     reachable by ID (existing checks/claims/recommendations keep
     working) — they just stop appearing in *this* list once a newer
     search completes. If no DomainSearch has completed yet for the
-    project, this correctly returns an empty result set rather than
-    falling back to an in-progress/failed search's (nonexistent)
-    results.
+    project (or for its current brand), this correctly returns an
+    empty result set rather than falling back to an in-progress/failed
+    search's (nonexistent) results.
     """
 
     permission_classes = [IsAuthenticated]
@@ -179,11 +194,15 @@ class DomainResultListView(APIView):
             user=request.user,
         )
 
+        search_filters = {
+            "project": project,
+            "status": DomainSearch.Status.COMPLETED,
+        }
+        if project.selected_brand_id:
+            search_filters["brand_idea_id"] = project.selected_brand_id
+
         latest_search = (
-            DomainSearch.objects.filter(
-                project=project,
-                status=DomainSearch.Status.COMPLETED,
-            )
+            DomainSearch.objects.filter(**search_filters)
             .order_by("-created_at")
             .first()
         )
@@ -228,6 +247,15 @@ class DomainSelectView(APIView):
          "Select" button until that check resolves to CLEAR. This
          check exists so the same rule holds for a direct API call
          that bypasses the frontend entirely, not just the UI gate.
+      #7 A domain result must belong to a search run under the
+         project's *currently selected* brand (audit fix — change-brand
+         bug). Same "server-side backstop" reasoning as #6: DomainResultListView
+         now filters stale-brand results out of the grid, so this
+         shouldn't be reachable through the UI in practice — but
+         before that read-side fix, a domain from a previous brand's
+         search could be selected against a newly-changed brand with
+         nothing catching it. This guard makes that impossible even
+         via a direct API call.
     """
 
     permission_classes = [IsAuthenticated]
@@ -289,6 +317,20 @@ class DomainSelectView(APIView):
             return api_error(
                 code="CONFLICT",
                 message="This domain has active trademark claims and cannot be selected.",
+                status_code=status.HTTP_409_CONFLICT,
+            )
+
+        # Rule #7 — the domain's search must belong to the project's
+        # currently selected brand. Guards against selecting a domain
+        # left over from a search run under a brand the founder has
+        # since changed away from.
+        if (
+            project.selected_brand_id
+            and domain_result.search.brand_idea_id != project.selected_brand_id
+        ):
+            return api_error(
+                code="CONFLICT",
+                message="This domain was found under a different brand than the one currently selected.",
                 status_code=status.HTTP_409_CONFLICT,
             )
 
