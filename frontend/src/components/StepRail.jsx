@@ -23,7 +23,6 @@ export default function StepRail({ steps, frontierIndex, viewIndex, onSelect }) 
           const isLocked = i > frontierIndex;
           const isViewed = i === viewIndex;
           const clickable = isDone || isCurrent;
-
           return (
             <div key={step.key} className="flex flex-1 items-center last:flex-none">
               <button
@@ -36,7 +35,7 @@ export default function StepRail({ steps, frontierIndex, viewIndex, onSelect }) 
                   className={
                     "flex h-7 w-7 items-center justify-center rounded-full border-2 font-mono text-xs transition " +
                     (isDone
-                      ? "border-live bg-live/10 text-live"
+                      ? "border-live bg-live/10 text-live animate-stamp-drop"
                       : isCurrent
                       ? "border-signal bg-signal/10 text-signal"
                       : "border-hairline text-ink/25") +
@@ -54,7 +53,6 @@ export default function StepRail({ steps, frontierIndex, viewIndex, onSelect }) 
                   {step.label}
                 </span>
               </button>
-
               {i < steps.length - 1 && (
                 <span
                   className={
