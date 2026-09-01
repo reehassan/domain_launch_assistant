@@ -2,6 +2,10 @@
 // Password input with a show/hide toggle. Hand-rolled inline SVG icons
 // (no icon library in package.json) to match Logo.jsx's own inline-SVG
 // approach rather than adding a dependency for two icons.
+//
+// onFocus/onBlur added so a parent page can drive mascot pose state
+// (e.g. Mascot switching to "covering" while this field is focused)
+// without PasswordInput needing to know anything about mascots itself.
 
 import { useState } from "react";
 
@@ -27,6 +31,8 @@ export default function PasswordInput({
   label,
   value,
   onChange,
+  onFocus,
+  onBlur,
   required,
   minLength,
   autoComplete,
@@ -44,6 +50,8 @@ export default function PasswordInput({
           type={visible ? "text" : "password"}
           value={value}
           onChange={onChange}
+          onFocus={onFocus}
+          onBlur={onBlur}
           required={required}
           minLength={minLength}
           autoComplete={autoComplete}
