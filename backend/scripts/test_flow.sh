@@ -721,6 +721,67 @@ else
 fi
 
 echo
+echo "== 16. Toggle WHOIS privacy (Feature 5, sandbox-only) =="
+TOGGLE_RESPONSE=$(post_with_status "$BASE_URL/domains/$DOMAIN_ID/toggle-privacy/" "$TOKEN" '{"enabled": true}')
+echo "$TOGGLE_RESPONSE"
+TOGGLE_BODY=$(echo "$TOGGLE_RESPONSE" | tail -n +2)
+TOGGLE_TASK_ID=$(extract "$TOGGLE_BODY" "task_id")
+if [ -n "$TOGGLE_TASK_ID" ]; then
+  poll_task "$TOGGLE_TASK_ID"
+fi
+
+echo
+echo "== 17. Create DNS record (gated on project.status == READY) =="
+CREATE_DNS_RESPONSE=$(post_with_status "$BASE_URL/domains/$DOMAIN_ID/create-dns-record/" "$TOKEN" \
+  '{"host": "test", "type": "A", "answer": "192.0.2.1", "ttl": 300}')
+echo "$CREATE_DNS_RESPONSE"
+CREATE_DNS_BODY=$(echo "$CREATE_DNS_RESPONSE" | tail -n +2)
+CREATE_DNS_TASK_ID=$(extract "$CREATE_DNS_BODY" "task_id")
+DNS_RECORD_ID=""
+if [ -n "$CREATE_DNS_TASK_ID" ]; then
+  CREATE_DNS_RESULT=$(poll_task "$CREATE_DNS_TASK_ID")
+  echo "$CREATE_DNS_RESULT"
+  DNS_RECORD_ID=$(python3 -c "
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+    print((data.get('result') or {}).get('id', ''))
+except Exception:
+    print('')
+" "$CREATE_DNS_RESULT")
+  echo "-> DNS_RECORD_ID=$DNS_RECORD_ID"
+fi
+
+echo
+echo "== 17b. List DNS records — should include the record just created =="
+get_with_status "$BASE_URL/domains/$DOMAIN_ID/dns-records/" "$TOKEN"
+
+if [ -n "$DNS_RECORD_ID" ]; then
+  echo
+  echo "== 17c. Update DNS record (full replace, per name.com semantics) =="
+  UPDATE_DNS_RESPONSE=$(post_with_status "$BASE_URL/domains/$DOMAIN_ID/dns-records/$DNS_RECORD_ID/update/" "$TOKEN" \
+    '{"host": "test", "type": "A", "answer": "192.0.2.2", "ttl": 300}')
+  echo "$UPDATE_DNS_RESPONSE"
+  UPDATE_DNS_BODY=$(echo "$UPDATE_DNS_RESPONSE" | tail -n +2)
+  UPDATE_DNS_TASK_ID=$(extract "$UPDATE_DNS_BODY" "task_id")
+  if [ -n "$UPDATE_DNS_TASK_ID" ]; then
+    poll_task "$UPDATE_DNS_TASK_ID"
+  fi
+
+  echo
+  echo "== 17d. Delete DNS record =="
+  DELETE_DNS_RESPONSE=$(post_with_status "$BASE_URL/domains/$DOMAIN_ID/dns-records/$DNS_RECORD_ID/delete/" "$TOKEN" '{}')
+  echo "$DELETE_DNS_RESPONSE"
+  DELETE_DNS_BODY=$(echo "$DELETE_DNS_RESPONSE" | tail -n +2)
+  DELETE_DNS_TASK_ID=$(extract "$DELETE_DNS_BODY" "task_id")
+  if [ -n "$DELETE_DNS_TASK_ID" ]; then
+    poll_task "$DELETE_DNS_TASK_ID"
+  fi
+else
+  echo "!! Skipping update/delete — no DNS_RECORD_ID from create step."
+fi
+
+echo
 echo "== Done =="
 echo "PROJECT_ID=$PROJECT_ID"
 echo "BRAND_ID=$BRAND_ID"
