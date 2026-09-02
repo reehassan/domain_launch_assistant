@@ -123,3 +123,4 @@ docker-compose.override.yml
 node_modules/
 dist/
 .env.local
+backend/scripts/dns_privacy_check.sh
